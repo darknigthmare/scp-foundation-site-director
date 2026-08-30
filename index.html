@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101619">
+  <meta name="description" content="SCP Foundation: Site Director — city-builder de confinement multi-couches.">
+  <title>SCP Foundation: Site Director</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div id="app-shell">
+    <header id="top-bar">
+      <div class="brand-block">
+        <div class="brand-mark" aria-hidden="true"><span>↓</span></div>
+        <div><strong>SCP FOUNDATION</strong><small>SITE DIRECTOR · DEEP PROTOCOL</small></div>
+      </div>
+      <div class="resource-strip" aria-label="Ressources principales">
+        <div><span>CRÉDITS</span><b id="funds-display">0</b></div>
+        <div><span>ÉNERGIE</span><b id="power-display">0</b></div>
+        <div><span>EAU</span><b id="water-display">0</b></div>
+        <div><span>RECHERCHE</span><b id="research-display">0</b></div>
+        <div><span>RENSEIGNEMENT</span><b id="intel-display">0</b></div>
+      </div>
+      <div class="time-controls">
+        <div id="alert-indicator" class="alert-indicator nominal">SITE NOMINAL</div>
+        <span id="time-display">J1 · 06:00</span>
+        <div class="speed-group" aria-label="Vitesse du jeu">
+          <button data-action="pause" data-speed="0" title="Pause">Ⅱ</button>
+          <button data-speed="1" title="Vitesse normale">▶</button>
+          <button data-speed="2" title="Vitesse rapide">▶▶</button>
+          <button data-speed="4" title="Vitesse maximale">▶▶▶</button>
+        </div>
+      </div>
+    </header>
+
+    <aside id="left-nav" aria-label="Couches du Site">
+      <button data-view="region" class="active"><span>◎</span><b>Région</b><small>Ville & couverture</small></button>
+      <button data-view="surface"><span>▦</span><b>Surface</b><small>Gestion Theme Hospital</small></button>
+      <button data-view="underground"><span>⇩</span><b>Sous-sol</b><small>Confinement vertical</small></button>
+      <button data-view="command"><span>!</span><b>Crise</b><small>Commandement tactique</small></button>
+      <button data-view="management"><span>≡</span><b>Gestion</b><small>Dossiers & personnel</small></button>
+      <button data-action="open-notifications" class="nav-notifications"><span>◉</span><b>Rapports</b><small>Alertes et journal</small><i id="notification-count" class="notification-count hidden">0</i></button>
+    </aside>
+
+    <main id="game-stage">
+      <canvas id="game-canvas" aria-label="Vue interactive du Site"></canvas>
+      <div id="management-overlay" class="hidden"></div>
+      <div id="objective-strip"></div>
+    </main>
+
+    <aside id="right-panel" aria-label="Panneau contextuel"></aside>
+  </div>
+
+  <div id="modal-root" class="modal-root hidden" role="dialog" aria-modal="true"></div>
+  <div id="toast" class="toast" role="status"></div>
+  <input id="import-file" type="file" accept="application/json,.json" hidden>
+
+  <section id="start-screen" class="start-screen">
+    <div class="start-backdrop"></div>
+    <div class="start-card">
+      <div class="start-logo"><span>↓</span></div>
+      <p class="eyebrow">SECURE · CONTAIN · PROTECT</p>
+      <h1>SCP FOUNDATION<br><em>SITE DIRECTOR</em></h1>
+      <p class="start-lead">Construisez la couverture. Organisez le complexe de surface. Creusez le confinement. Écrivez les procédures. Survivez aux crises.</p>
+      <div class="start-features">
+        <span>City-builder régional</span>
+        <span>Gestion de surface</span>
+        <span>Sous-sol en coupe</span>
+        <span>Procédures SCP</span>
+      </div>
+      <div class="start-actions">
+        <button data-action="new-game" class="primary">Nouvelle partie</button>
+        <button data-action="load">Continuer</button>
+      </div>
+      <small>Version 1.0.0 · Jouable hors ligne · Sauvegarde locale</small>
+    </div>
+  </section>
+
+  <section id="end-screen" class="end-screen hidden"></section>
+
+  <script src="./game.js"></script>
+</body>
+</html>

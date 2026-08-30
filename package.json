@@ -1,0 +1,19 @@
+{
+  "name": "scp-foundation-site-director",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Jeu de gestion SCP combinant city-builder régional, complexe de surface et confinement souterrain.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/serve.mjs",
+    "start": "node scripts/serve.mjs --dist",
+    "check": "node scripts/validate.mjs",
+    "test": "npm run build && npm run check"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

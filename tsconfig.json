@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "none",
+    "lib": ["ES2020", "DOM"],
+    "strict": true,
+    "outFile": "dist/game.js",
+    "removeComments": false,
+    "sourceMap": true,
+    "noImplicitAny": true,
+    "noUncheckedIndexedAccess": false,
+    "skipLibCheck": true
+  },
+  "files": [
+    "src/types.ts",
+    "src/data.ts",
+    "src/utils.ts",
+    "src/state.ts",
+    "src/simulation.ts",
+    "src/renderers.ts",
+    "src/ui.ts",
+    "src/main.ts"
+  ]
+}
