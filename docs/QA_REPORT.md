@@ -2,7 +2,7 @@
 
 ## Passe de publication — 4 septembre 2026
 
-**Résultat local : réussi.** Le bundle courant a été testé dans un vrai navigateur à 1280 × 720 et 390 × 844, puis sous réseau bloqué après prise de contrôle du service worker. Les résultats de production sont ajoutés après le redéploiement du commit publié.
+**Résultat local et production : réussi.** Le bundle courant a été testé dans un vrai navigateur à 1280 × 720 et 390 × 844, puis sous réseau bloqué après prise de contrôle du service worker. Le commit jeu `9518fd2` a été poussé sur `main` et déployé explicitement sur l'alias public.
 
 | Étape | Résultat vérifié |
 |---|---|
@@ -18,6 +18,12 @@
 | Licence hors ligne | `ATTRIBUTION.md` et `LICENSE.md` lus avec succès depuis le cache |
 | Web Vitals local | TTFB 3 ms, FCP/LCP 1 648 ms, CLS 0 |
 | HTTP local | Assets distribués en 200 ; `.env`, `.git/config`, sources, docs internes et source map en 404 ; traversées encodées/malformées en 400 |
+| Vercel production | Déploiement `dpl_9P9ryQ7adVRtQCaCUZmv6RDFzCiy` en état Ready, alias `scp-foundation-site-director.vercel.app` |
+| HTTP production | Racine, manifeste, SW, PNG et documents légaux en 200 ; chemins sensibles et source map en 404 ; traversal encodé en 400 |
+| Headers production | CSP avec `object-src 'none'`, anti-framing, `nosniff`, Referrer-Policy, Permissions-Policy et HSTS présents |
+| Navigateur production | Nouvelle campagne, pause, Surface desktop et mobile 390/390 réussies ; console et erreurs vides ; Axe 0 violation |
+| PWA production hors ligne | Contrôleur r4 actif, cache légal présent, rechargement et lecture d'attribution réussis sous réseau bloqué |
+| Web Vitals production | TTFB 12,6 ms, FCP/LCP 1 820 ms, CLS 0 |
 
 Les 12 non-régressions métier couvrent : objectif initial, sauvegarde la plus récente, exclusion des salles support, cellule Keter renforcée pour SCP-682, ordre de crise sans paiement fantôme, migration partielle simulable, expiration des anciens effets différés, premier transfert/relocalisation, verrouillage et minima des procédures, file médicale unique, stabilité Keter pendant 1 440 minutes consécutives et neutralisation d'une compromission interne.
 
@@ -28,6 +34,8 @@ Captures acceptées sur le bundle courant :
 - [Exercice de crise](qa/2026-09-04/12-crisis-release.png)
 - [Région mobile](qa/2026-09-04/16-mobile-region-release.png)
 - [Feuille Détails mobile](qa/2026-09-04/17-mobile-panel-open-release.png)
+- [Surface sur l'alias production](qa/2026-09-04/19-production-surface.png)
+- [Mobile sur l'alias production](qa/2026-09-04/20-production-mobile.png)
 
 ## Preuve historique — 28 août 2026
 

@@ -19,6 +19,8 @@
 
 Validation actuelle : `npm test` réussit avec 12/12 tests métier, build TypeScript et validation structurelle renforcée.
 
+Publication vérifiée le 4 septembre 2026 : commit jeu `9518fd2`, déploiement Vercel production `dpl_9P9ryQ7adVRtQCaCUZmv6RDFzCiy`, alias public, headers, PWA hors ligne, desktop et mobile validés.
+
 Cette archive contient la première version jouable de **SCP Foundation: Site Director — Deep Protocol**.
 
 Le jeu peut être lancé localement, installé comme PWA ou déployé comme site statique. Le dossier `dist/` est le build final ; le reste contient le code source, les documents de conception, les tests et le prompt de reprise Codex.
