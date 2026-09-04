@@ -52,7 +52,7 @@ namespace SCPGame {
     const context = canvas.getContext("2d");
     if (!context) throw new Error("Contexte 2D indisponible.");
 
-    const loaded = loadGame(true) ?? loadGame(false);
+    const loaded = loadLatestGame();
     const state = loaded ?? createNewGame("campaign", "standard");
     state.speed = 0;
     const runtime: RuntimeState = {
@@ -63,6 +63,7 @@ namespace SCPGame {
       accumulator: 0,
       pointerDown: false,
       uiDirty: true,
+      canvasDirty: true,
       animationFrame: 0
     };
     const audio = new ProceduralAudio();
@@ -72,8 +73,8 @@ namespace SCPGame {
     bindGlobalAudio(audio, runtime);
     showStartScreen();
     renderCanvas(runtime);
+    runtime.canvasDirty = false;
 
-    let lastUiRefresh = 0;
     const frame = (time: number): void => {
       const deltaSeconds = Math.min(0.12, Math.max(0, (time - runtime.lastFrame) / 1000));
       runtime.lastFrame = time;
@@ -84,21 +85,29 @@ namespace SCPGame {
           runtime.accumulator -= minutes;
           advanceSimulation(runtime.state, minutes);
           runtime.uiDirty = true;
+          runtime.canvasDirty = true;
         }
       }
       audio.update(runtime.state);
-      renderCanvas(runtime);
-      if (runtime.uiDirty || time - lastUiRefresh > 650) {
-        refreshUI(runtime);
-        lastUiRefresh = time;
+      if (!document.hidden && runtime.canvasDirty) {
+        renderCanvas(runtime);
+        runtime.canvasDirty = false;
       }
+      if (runtime.uiDirty) refreshUI(runtime);
       runtime.animationFrame = requestAnimationFrame(frame);
     };
     runtime.animationFrame = requestAnimationFrame(frame);
 
     window.addEventListener("resize", () => {
-      renderCanvas(runtime);
+      runtime.canvasDirty = true;
       runtime.uiDirty = true;
+    });
+    document.addEventListener("visibilitychange", () => {
+      runtime.lastFrame = performance.now();
+      if (!document.hidden) {
+        runtime.canvasDirty = true;
+        runtime.uiDirty = true;
+      }
     });
     window.addEventListener("beforeunload", () => saveGame(runtime.state, true));
 
@@ -121,6 +130,7 @@ namespace SCPGame {
 
     canvas.addEventListener("pointermove", (event) => {
       runtime.hoveredCell = hoverCellForView(runtime, event.clientX, event.clientY);
+      runtime.canvasDirty = true;
       if (runtime.pointerDown && lastPointer) {
         const dx = event.clientX - lastPointer.x;
         const dy = event.clientY - lastPointer.y;
@@ -129,6 +139,7 @@ namespace SCPGame {
         if (["region", "surface", "underground"].includes(runtime.state.view)) {
           camera.offsetX += dx;
           camera.offsetY += dy;
+          runtime.canvasDirty = true;
         }
       }
       lastPointer = { x: event.clientX, y: event.clientY };
@@ -152,11 +163,15 @@ namespace SCPGame {
       lastPointer = undefined;
       runtime.dragStart = undefined;
       runtime.uiDirty = true;
+      runtime.canvasDirty = true;
       refreshUI(runtime, true);
     });
 
     canvas.addEventListener("pointerleave", () => {
-      if (!runtime.pointerDown) runtime.hoveredCell = undefined;
+      if (!runtime.pointerDown) {
+        runtime.hoveredCell = undefined;
+        runtime.canvasDirty = true;
+      }
     });
 
     canvas.addEventListener("wheel", (event) => {
@@ -171,7 +186,54 @@ namespace SCPGame {
       const ratio = camera.zoom / oldZoom;
       camera.offsetX -= pointerX * (ratio - 1) * 0.35;
       camera.offsetY -= pointerY * (ratio - 1) * 0.35;
+      runtime.canvasDirty = true;
     }, { passive: false });
+
+    canvas.addEventListener("keydown", (event) => {
+      if (["+", "=", "-", "PageUp", "PageDown"].includes(event.key)) {
+        if (!["region", "surface", "underground"].includes(runtime.state.view)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const camera = runtime.state.camera[runtime.state.view];
+        const zoomIn = ["+", "=", "PageUp"].includes(event.key);
+        camera.zoom = clamp(camera.zoom * (zoomIn ? 1.1 : 0.9), 0.62, 1.5);
+        runtime.canvasDirty = true;
+        announceCanvas(`Zoom ${Math.round(camera.zoom * 100)} %.`);
+        return;
+      }
+      const bounds = gridBounds(runtime.state);
+      if (!bounds) return;
+      const current = runtime.hoveredCell ?? { x: Math.floor(bounds.width / 2), y: Math.floor(bounds.height / 2) };
+      let next = { ...current };
+      if (event.key === "ArrowLeft") next.x -= 1;
+      else if (event.key === "ArrowRight") next.x += 1;
+      else if (event.key === "ArrowUp") next.y -= 1;
+      else if (event.key === "ArrowDown") next.y += 1;
+      else if (event.key === "Home") next = { x: Math.floor(bounds.width / 2), y: Math.floor(bounds.height / 2) };
+      else if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+        audio.click(runtime.state.settings.audio);
+        handleGridCellActivation(runtime, current);
+        announceCanvas(`Case ${current.x + 1}, ${current.y + 1} activée.`);
+        runtime.uiDirty = true;
+        runtime.canvasDirty = true;
+        refreshUI(runtime, true);
+        return;
+      } else return;
+      event.preventDefault();
+      event.stopPropagation();
+      next.x = clamp(next.x, 0, bounds.width - 1);
+      next.y = clamp(next.y, 0, bounds.height - 1);
+      runtime.hoveredCell = next;
+      runtime.canvasDirty = true;
+      announceCanvas(`Curseur colonne ${next.x + 1}, ligne ${next.y + 1}.`);
+    });
+
+    canvas.addEventListener("blur", () => {
+      runtime.hoveredCell = undefined;
+      runtime.canvasDirty = true;
+    });
   }
 
   function hoverCellForView(runtime: RuntimeState, clientX: number, clientY: number): Point | undefined {
@@ -182,22 +244,40 @@ namespace SCPGame {
   }
 
   function handleCanvasActivation(runtime: RuntimeState, clientX: number, clientY: number): void {
+    const cell = hoverCellForView(runtime, clientX, clientY);
+    if (cell) {
+      handleGridCellActivation(runtime, cell);
+      return;
+    }
+    selectAtCanvas(runtime, clientX, clientY);
+  }
+
+  function handleGridCellActivation(runtime: RuntimeState, cell: Point): void {
     const state = runtime.state;
     const build = state.buildSelection;
     let result: { ok: boolean; message: string } | undefined;
     if (build && build.layer === "region" && state.view === "region") {
-      const cell = screenToRegionCell(runtime, clientX, clientY);
       result = buildRegionFacility(state, build.type as RegionFacilityType, cell.x, cell.y);
     } else if (build && build.layer === "surface" && state.view === "surface") {
-      const cell = screenToSurfaceCell(runtime, clientX, clientY);
       result = buildSurfaceRoom(state, build.type as SurfaceRoomType, cell.x, cell.y);
     } else if (build && build.layer === "underground" && state.view === "underground") {
-      const cell = screenToUndergroundCell(runtime, clientX, clientY);
       result = buildUndergroundRoom(state, build.type as UndergroundRoomType, cell.x, cell.y);
     } else {
-      selectAtCanvas(runtime, clientX, clientY);
+      selectAtGridCell(runtime, cell);
     }
     if (result) showToast(result.message, result.ok ? "success" : "error");
+  }
+
+  function gridBounds(state: GameState): { width: number; height: number } | undefined {
+    if (state.view === "region") return { width: state.regionWidth, height: state.regionHeight };
+    if (state.view === "surface") return { width: state.surfaceWidth, height: state.surfaceHeight };
+    if (state.view === "underground") return { width: state.undergroundWidth, height: state.undergroundLevels };
+    return undefined;
+  }
+
+  function announceCanvas(message: string): void {
+    const status = document.getElementById("canvas-status");
+    if (status) status.textContent = message;
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);

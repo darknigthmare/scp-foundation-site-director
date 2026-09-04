@@ -8,6 +8,7 @@
   <title>SCP Foundation: Site Director</title>
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icon-192.png">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
@@ -17,7 +18,7 @@
         <div class="brand-mark" aria-hidden="true"><span>↓</span></div>
         <div><strong>SCP FOUNDATION</strong><small>SITE DIRECTOR · DEEP PROTOCOL</small></div>
       </div>
-      <div class="resource-strip" aria-label="Ressources principales">
+      <div class="resource-strip" role="group" aria-label="Ressources principales">
         <div><span>CRÉDITS</span><b id="funds-display">0</b></div>
         <div><span>ÉNERGIE</span><b id="power-display">0</b></div>
         <div><span>EAU</span><b id="water-display">0</b></div>
@@ -27,11 +28,11 @@
       <div class="time-controls">
         <div id="alert-indicator" class="alert-indicator nominal">SITE NOMINAL</div>
         <span id="time-display">J1 · 06:00</span>
-        <div class="speed-group" aria-label="Vitesse du jeu">
-          <button data-action="pause" data-speed="0" title="Pause">Ⅱ</button>
-          <button data-speed="1" title="Vitesse normale">▶</button>
-          <button data-speed="2" title="Vitesse rapide">▶▶</button>
-          <button data-speed="4" title="Vitesse maximale">▶▶▶</button>
+        <div class="speed-group" role="group" aria-label="Vitesse du jeu">
+          <button data-action="pause" data-speed="0" title="Pause" aria-label="Mettre le jeu en pause">Ⅱ</button>
+          <button data-speed="1" title="Vitesse normale" aria-label="Vitesse normale">▶</button>
+          <button data-speed="2" title="Vitesse rapide" aria-label="Vitesse rapide">▶▶</button>
+          <button data-speed="4" title="Vitesse maximale" aria-label="Vitesse maximale">▶▶▶</button>
         </div>
       </div>
     </header>
@@ -46,7 +47,9 @@
     </aside>
 
     <main id="game-stage">
-      <canvas id="game-canvas" aria-label="Vue interactive du Site"></canvas>
+      <canvas id="game-canvas" tabindex="0" role="application" aria-label="Vue interactive du Site" aria-describedby="canvas-help"></canvas>
+      <p id="canvas-help" class="sr-only">Utilisez les flèches pour déplacer le curseur sur la grille, Entrée pour construire ou sélectionner, plus et moins pour zoomer, et Échap pour annuler.</p>
+      <p id="canvas-status" class="sr-only" aria-live="polite"></p>
       <div id="management-overlay" class="hidden"></div>
       <div id="objective-strip"></div>
     </main>
@@ -73,9 +76,10 @@
       </div>
       <div class="start-actions">
         <button data-action="new-game" class="primary">Nouvelle partie</button>
-        <button data-action="load">Continuer</button>
+        <button data-action="load" id="continue-button">Continuer</button>
+        <button data-action="credits">Attribution</button>
       </div>
-      <small>Version 1.0.0 · Jouable hors ligne · Sauvegarde locale</small>
+      <small>Version 1.0.0 · Jouable hors ligne · CC BY-SA 3.0</small>
     </div>
   </section>
 

@@ -24,5 +24,7 @@ if (existsSync(localTsc)) {
 
 copyFileSync(join(root, "index.html"), join(dist, "index.html"));
 copyFileSync(join(root, "styles.css"), join(dist, "styles.css"));
+copyFileSync(join(root, "ATTRIBUTION.md"), join(dist, "ATTRIBUTION.md"));
+copyFileSync(join(root, "LICENSE.md"), join(dist, "LICENSE.md"));
 cpSync(join(root, "public"), dist, { recursive: true });
 console.log(`Build créé dans ${dist}`);

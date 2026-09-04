@@ -1,7 +1,38 @@
 # Rapport QA — version 1.0.0
 
+## Passe de publication — 4 septembre 2026
+
+**Résultat local : réussi.** Le bundle courant a été testé dans un vrai navigateur à 1280 × 720 et 390 × 844, puis sous réseau bloqué après prise de contrôle du service worker. Les résultats de production sont ajoutés après le redéploiement du commit publié.
+
+| Étape | Résultat vérifié |
+|---|---|
+| `npm test` | Réussi : build TypeScript, 12/12 tests métier, validation structurelle |
+| `tsc --noEmit` | Réussi en mode strict |
+| `npm audit --audit-level=high` | 0 vulnérabilité |
+| Syntaxe bundle, service worker et serveur | Réussie avec `node --check` |
+| Desktop 1280 × 720 | Création, pause, navigation, grille/zoom clavier, Gestion, sauvegarde/import, recherche et crise réussis |
+| Mobile 390 × 844 | 5 ressources visibles, largeur 390/390, navigation accessible, feuille Détails ouverte/fermée |
+| Axe WCAG 2 A/AA | 0 violation desktop et mobile ; 1 contrôle incomplet car les fonds sont des dégradés |
+| Console / erreurs page | Aucun message, aucune erreur |
+| PWA r4 | Contrôleur actif, cache unique r4, démarrage sous réseau bloqué réussi |
+| Licence hors ligne | `ATTRIBUTION.md` et `LICENSE.md` lus avec succès depuis le cache |
+| Web Vitals local | TTFB 3 ms, FCP/LCP 1 648 ms, CLS 0 |
+| HTTP local | Assets distribués en 200 ; `.env`, `.git/config`, sources, docs internes et source map en 404 ; traversées encodées/malformées en 400 |
+
+Les 12 non-régressions métier couvrent : objectif initial, sauvegarde la plus récente, exclusion des salles support, cellule Keter renforcée pour SCP-682, ordre de crise sans paiement fantôme, migration partielle simulable, expiration des anciens effets différés, premier transfert/relocalisation, verrouillage et minima des procédures, file médicale unique, stabilité Keter pendant 1 440 minutes consécutives et neutralisation d'une compromission interne.
+
+Captures acceptées sur le bundle courant :
+
+- [Surface desktop](qa/2026-09-04/06-surface-final.png)
+- [Gestion et sauvegarde](qa/2026-09-04/11-management-release.png)
+- [Exercice de crise](qa/2026-09-04/12-crisis-release.png)
+- [Région mobile](qa/2026-09-04/16-mobile-region-release.png)
+- [Feuille Détails mobile](qa/2026-09-04/17-mobile-panel-open-release.png)
+
+## Preuve historique — 28 août 2026
+
 **Date : 28 août 2026**  
-**Build testé : `dist/`**
+**Build testé : ancien `dist/`**
 
 ## Résultat global
 

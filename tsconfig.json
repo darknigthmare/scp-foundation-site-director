@@ -6,7 +6,7 @@
     "strict": true,
     "outFile": "dist/game.js",
     "removeComments": false,
-    "sourceMap": true,
+    "sourceMap": false,
     "noImplicitAny": true,
     "noUncheckedIndexedAccess": false,
     "skipLibCheck": true

@@ -209,9 +209,11 @@ namespace SCPGame {
       ctx.fillRect(base.x + 3, base.y + metrics.tileH * 0.3 - h + 8, 2, 2);
     }
     ctx.restore();
-    ctx.fillStyle = "rgba(220,229,233,.55)";
-    ctx.font = "11px system-ui";
-    ctx.fillText("AGGLOMÉRATION CIVILE", 18, height - 22);
+    if (width >= 620) {
+      ctx.fillStyle = "rgba(220,229,233,.55)";
+      ctx.font = "11px system-ui";
+      ctx.fillText("AGGLOMÉRATION CIVILE", 18, height - 22);
+    }
   }
 
   function drawRegionFacility(ctx: CanvasRenderingContext2D, runtime: RuntimeState, facility: RegionFacility, width: number): void {
@@ -241,9 +243,11 @@ namespace SCPGame {
     ctx.fillStyle = "#edf3f2";
     ctx.font = "700 11px system-ui";
     ctx.fillText(definition.icon, base.x, base.y + footprintH / 2 - height3d / 2 + 4);
-    ctx.font = "10px system-ui";
-    ctx.fillStyle = "rgba(234,241,241,.82)";
-    ctx.fillText(definition.name, base.x, base.y + footprintH / 2 + 13);
+    if (width >= 620 || selected) {
+      ctx.font = "10px system-ui";
+      ctx.fillStyle = "rgba(234,241,241,.82)";
+      ctx.fillText(definition.name, base.x, base.y + footprintH / 2 + 13);
+    }
     ctx.textAlign = "left";
 
     if (facility.condition < 55) drawWarningBadge(ctx, base.x + footprintW / 2 - 5, base.y + footprintH / 2 - height3d - 4, "!");
@@ -637,32 +641,38 @@ namespace SCPGame {
   export function selectAtCanvas(runtime: RuntimeState, clientX: number, clientY: number): void {
     const state = runtime.state;
     if (state.view === "region") {
-      const cell = screenToRegionCell(runtime, clientX, clientY);
+      selectAtGridCell(runtime, screenToRegionCell(runtime, clientX, clientY));
+    } else if (state.view === "surface") {
+      selectAtGridCell(runtime, screenToSurfaceCell(runtime, clientX, clientY));
+    } else if (state.view === "underground") {
+      selectAtGridCell(runtime, screenToUndergroundCell(runtime, clientX, clientY));
+    } else if (state.view === "command") {
+      const zone = screenToCommandZone(runtime, clientX, clientY);
+      state.selectedId = zone?.id;
+      state.selectedType = zone ? "zone" : undefined;
+    }
+  }
+
+  export function selectAtGridCell(runtime: RuntimeState, cell: Point): void {
+    const state = runtime.state;
+    if (state.view === "region") {
       const facility = [...state.regionFacilities].reverse().find((entry) => pointInRect(cell, entry.x, entry.y, entry.width, entry.height));
       state.selectedId = facility?.id;
       state.selectedType = facility ? "facility" : undefined;
     } else if (state.view === "surface") {
-      const cell = screenToSurfaceCell(runtime, clientX, clientY);
       const room = [...state.surfaceRooms].reverse().find((entry) => pointInRect(cell, entry.x, entry.y, entry.width, entry.height));
       if (room) {
         state.selectedId = room.id;
         state.selectedType = "surface-room";
       } else {
-        const rect = runtime.canvas.getBoundingClientRect();
-        const metrics = surfaceMetrics(runtime, rect.width, rect.height);
         const staff = state.staff.find((member) => member.position.layer === "surface" && Math.hypot(member.position.x - cell.x, member.position.y - cell.y) < 0.8);
         state.selectedId = staff?.id;
         state.selectedType = staff ? "staff" : undefined;
       }
     } else if (state.view === "underground") {
-      const cell = screenToUndergroundCell(runtime, clientX, clientY);
       const room = [...state.undergroundRooms].reverse().find((entry) => entry.level === cell.y && cell.x >= entry.x && cell.x < entry.x + entry.width);
       state.selectedId = room?.id;
       state.selectedType = room ? "underground-room" : undefined;
-    } else if (state.view === "command") {
-      const zone = screenToCommandZone(runtime, clientX, clientY);
-      state.selectedId = zone?.id;
-      state.selectedType = zone ? "zone" : undefined;
     }
   }
 

@@ -4,11 +4,11 @@
 
 Depuis l’écran titre, choisir **Nouvelle partie**, puis le mode et la difficulté. La campagne guide les déblocages ; le bac à sable rend tout disponible pour expérimenter.
 
-Le temps est initialement en pause. Utiliser les commandes de vitesse en haut à droite ou la barre d’espace.
+Une nouvelle campagne démarre à vitesse normale. Utiliser les commandes de vitesse en haut à droite ou la barre d’espace ; ouvrir une modale opérationnelle met temporairement la simulation en pause sans écraser une pause décidée par le joueur.
 
 ## 2. Lire l’interface
 
-La barre supérieure affiche crédits, énergie, eau, recherche, renseignement, état du Site, jour, heure et vitesse. La navigation gauche change de couche. Le panneau droit sert à construire, inspecter et agir. La bande inférieure affiche l’objectif actif ou le statut du bac à sable.
+La barre supérieure affiche crédits, énergie, eau, recherche, renseignement, état du Site, jour, heure et vitesse. La navigation gauche change de couche. Le panneau droit sert à construire, inspecter et agir. Sur mobile, **Détails/Masquer** ouvre explicitement ce panneau. La bande inférieure affiche l’objectif actif ou le statut du bac à sable.
 
 ## 3. Construire
 
@@ -17,11 +17,13 @@ La barre supérieure affiche crédits, énergie, eau, recherche, renseignement, 
 3. Cliquer sur une zone libre de la grille.
 4. Cliquer sur **Annuler** ou appuyer sur `Échap` pour quitter le mode construction.
 
+Au clavier, focaliser le plan, déplacer le curseur avec les flèches, revenir au centre avec `Home`, puis valider avec `Entrée`. Une annonce discrète restitue la case ou le niveau de zoom aux technologies d'assistance.
+
 Une construction impossible affiche immédiatement sa raison : crédits insuffisants, collision, technologie verrouillée ou niveau invalide.
 
 ## 4. Déplacer et zoomer
 
-Maintenir le bouton ou le doigt puis glisser pour déplacer la caméra. Utiliser la molette pour zoomer. La sélection d’un élément ouvre ses statistiques et actions.
+Maintenir le bouton ou le doigt puis glisser pour déplacer la caméra. Utiliser la molette pour zoomer. Au clavier, lorsque le Canvas est focalisé, `+`, `-`, `PageUp` et `PageDown` règlent le zoom sans modifier la vitesse. La sélection d’un élément ouvre ses statistiques et actions.
 
 ## 5. Région
 
@@ -58,7 +60,7 @@ Recommandation initiale :
 - 1 directeur ;
 - renforcer ensuite avec FTM.
 
-Affecter les employés aux salles pertinentes. Les besoins de repos, nourriture et soin sont automatiques, mais exigent les infrastructures correspondantes.
+Affecter les employés aux salles pertinentes. Les besoins de repos, nourriture et soin sont automatiques, mais exigent les infrastructures correspondantes. Organiser les rotations de jour et de nuit, terminer les formations engagées et lancer des vérifications ciblées lorsqu'une habilitation paraît compromise. Un contrôle justifié neutralise la menace ; un contrôle arbitraire a un coût humain et opérationnel.
 
 ## 8. Sous-sol
 
@@ -78,13 +80,13 @@ Un SCP contenu peut rester instable si la cellule est endommagée, sous-aliment�
 
 ## 10. Écrire une procédure
 
-Dans Gestion ou depuis le dossier SCP, ouvrir l’éditeur. Les options correspondent aux moyens réels du Site. La conformité augmente lorsque les exigences uniques sont respectées.
+Dans Gestion ou depuis le dossier SCP, ouvrir l’éditeur. Les options avancées restent verrouillées tant que la recherche correspondante n'est pas terminée. La conformité augmente lorsque les exigences uniques sont respectées.
 
-Ne pas maximiser aveuglément toutes les options : la complexité représente le temps, la documentation et le risque d’erreur humaine. Les procédures sont versionnées après modification.
+L'effectif prévu, la formation et la maintenance sont bornés par le risque du SCP. L'écran distingue l'effectif réellement affecté de la cible documentaire et recalcule la complexité au lieu d'accepter une valeur artificielle. Ne pas maximiser aveuglément toutes les options : la complexité représente le temps, la documentation et le risque d’erreur humaine. Les procédures sont versionnées après modification.
 
 ## 11. Recherche
 
-Les recherches consomment les points accumulés par les centres de recherche et laboratoires profonds. Vérifier les prérequis. Les nœuds débloquent constructions ou bonus permanents.
+Les recherches consomment les points accumulés par les centres de recherche et laboratoires profonds. Vérifier les prérequis. Les nœuds débloquent constructions, options de procédure ou bonus permanents. Une étude SCP arrivée à 100 % attribue une seule fois sa valeur de recherche et de connaissance.
 
 Priorités sûres : réseaux redondants, maintenance prédictive, excavation profonde, puis spécialisation correspondant aux SCP prévus.
 
@@ -104,20 +106,28 @@ Les ordres ne sont pas gratuits. Une réponse trop large peut épuiser personnel
 
 ## 13. Événements et inspections
 
-Lire les effets annoncés, mais aussi leurs conséquences implicites. Une visite publique peut améliorer la couverture tout en immobilisant des zones. Une solution rapide à une pénurie peut diminuer l’éthique ou la confiance du personnel.
+Lire les effets annoncés, mais aussi leurs conséquences différées. Une inspection repoussée revient sous forme d'audit renforcé, les heures supplémentaires nocturnes augmentent temporairement le risque d'erreur, et une filature ou une dissimulation éthique finit par produire son résultat. Les anciennes sauvegardes reçoivent un horodatage de migration afin que ces effets ne deviennent jamais permanents.
 
 ## 14. Sauvegarder
 
 Dans Gestion :
 
 - **Sauvegarder** écrit la partie locale ;
-- **Charger** restaure la dernière sauvegarde ;
+- **Charger** restaure la sauvegarde manuelle ou automatique la plus récente ;
 - **Exporter** télécharge un JSON ;
-- **Importer** restaure un JSON compatible.
+- **Importer** valide, normalise et migre un JSON compatible, puis le maintient en pause pour contrôle.
 
 Conserver régulièrement un export externe avant une modification importante du projet.
 
-## 15. Conseils avancés
+## 15. Accessibilité, mobile et installation
+
+- Tous les boutons, onglets, interrupteurs et modales principales sont utilisables au clavier ; `Tab` reste piégé dans une modale et le focus revient à son déclencheur à la fermeture.
+- Les raccourcis globaux sont suspendus derrière l'écran titre, une modale ou lorsqu'un contrôle natif est focalisé.
+- Les réglages proposent mouvements réduits, contraste renforcé, audio procédural, pause critique et conseils contextuels.
+- Sur petit écran, les cinq ressources restent visibles et la feuille **Détails/Masquer** respecte la zone sûre inférieure.
+- Une fois installée, la PWA met en cache le jeu, ses icônes ainsi que `ATTRIBUTION.md` et `LICENSE.md` pour consultation hors ligne.
+
+## 16. Conseils avancés
 
 - Dupliquer les fonctions critiques plutôt que construire un seul centre parfait.
 - Éviter qu’un même couloir serve aux visiteurs, blessés et anomalies.

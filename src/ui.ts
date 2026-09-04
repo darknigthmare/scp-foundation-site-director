@@ -1,7 +1,11 @@
 namespace SCPGame {
   let activeRuntime: RuntimeState | undefined;
-  let modalMode: "none" | "event" | "procedure" | "import" | "new-game" | "help" = "none";
+  let modalMode: "none" | "event" | "procedure" | "import" | "new-game" | "help" | "credits" = "none";
   let procedureScpId = "";
+  let renderedModalKey = "";
+  let modalReturnFocus: HTMLElement | undefined;
+  let modalPausedGame = false;
+  let renderedEndScreenKey = "";
 
   function escapeHtml(value: string): string {
     return value.replace(/[&<>'"]/g, (character) => ({
@@ -15,6 +19,76 @@ namespace SCPGame {
 
   function percent(value: number): string {
     return `${Math.round(value)} %`;
+  }
+
+  function focusSignature(element: HTMLElement): string | undefined {
+    if (element.id) return `id:${element.id}`;
+    const attributes = ["data-action", "data-view", "data-speed", "data-tab", "data-type", "data-role", "data-staff", "data-node", "data-scp", "data-room", "data-zone", "data-order", "data-setting"];
+    const selectors = attributes
+      .filter((name) => element.hasAttribute(name))
+      .map((name) => `[${name}="${String(element.getAttribute(name)).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"]`);
+    return selectors.length ? `selector:${element.tagName.toLowerCase()}${selectors.join("")}` : undefined;
+  }
+
+  function findFocusTarget(container: HTMLElement, signature: string): HTMLElement | null {
+    if (signature.startsWith("id:")) {
+      const target = document.getElementById(signature.slice(3));
+      return target && container.contains(target) ? target : null;
+    }
+    return container.querySelector<HTMLElement>(signature.slice("selector:".length));
+  }
+
+  function replaceHtmlPreservingInteraction(container: HTMLElement, html: string): void {
+    if (container.innerHTML === html) return;
+    const active = document.activeElement instanceof HTMLElement && container.contains(document.activeElement) ? document.activeElement : undefined;
+    const signature = active ? focusSignature(active) : undefined;
+    const scrollTop = container.scrollTop;
+    const scrollLeft = container.scrollLeft;
+    const nestedScroll = Array.from(container.querySelectorAll<HTMLElement>("[data-preserve-scroll]")).map((element) => ({
+      key: String(element.dataset.preserveScroll),
+      top: element.scrollTop,
+      left: element.scrollLeft
+    }));
+    container.innerHTML = html;
+    container.scrollTop = scrollTop;
+    container.scrollLeft = scrollLeft;
+    nestedScroll.forEach((entry) => {
+      const element = container.querySelector<HTMLElement>(`[data-preserve-scroll="${entry.key}"]`);
+      if (element) {
+        element.scrollTop = entry.top;
+        element.scrollLeft = entry.left;
+      }
+    });
+    if (signature) findFocusTarget(container, signature)?.focus({ preventScroll: true });
+  }
+
+  function setPageInert(inert: boolean): void {
+    const appShell = document.getElementById("app-shell") as HTMLElement | null;
+    const startScreen = document.getElementById("start-screen") as HTMLElement | null;
+    const endScreen = document.getElementById("end-screen") as HTMLElement | null;
+    const startVisible = Boolean(startScreen && !startScreen.classList.contains("hidden"));
+    const endVisible = Boolean(endScreen && !endScreen.classList.contains("hidden"));
+    if (appShell) appShell.inert = inert || startVisible || endVisible;
+    if (startScreen) startScreen.inert = inert;
+    if (endScreen) endScreen.inert = inert;
+  }
+
+  function prepareModal(state: GameState, returnFocus: HTMLElement): void {
+    if (modalMode === "none") modalReturnFocus = returnFocus;
+    const startScreen = document.getElementById("start-screen");
+    if (startScreen?.classList.contains("hidden") && state.speed > 0) {
+      state.previousSpeed = state.speed;
+      state.speed = 0;
+      modalPausedGame = true;
+    }
+  }
+
+  function closeModal(state: GameState): void {
+    modalMode = "none";
+    if (modalPausedGame && !state.currentEventId && document.getElementById("start-screen")?.classList.contains("hidden")) {
+      state.speed = state.previousSpeed || 1;
+    }
+    modalPausedGame = false;
   }
 
   export function initializeUI(runtime: RuntimeState): void {
@@ -31,15 +105,24 @@ namespace SCPGame {
   export function showStartScreen(): void {
     const screen = document.getElementById("start-screen");
     if (screen) screen.classList.remove("hidden");
+    setPageInert(modalMode !== "none");
+    const continueButton = document.getElementById("continue-button") as HTMLButtonElement | null;
+    if (continueButton) {
+      const available = hasSavedGame();
+      continueButton.disabled = !available;
+      continueButton.textContent = available ? "Continuer" : "Aucune sauvegarde";
+    }
   }
 
   export function hideStartScreen(): void {
     const screen = document.getElementById("start-screen");
     if (screen) screen.classList.add("hidden");
+    setPageInert(modalMode !== "none");
   }
 
   export function refreshUI(runtime: RuntimeState, force = false): void {
     activeRuntime = runtime;
+    if (force) runtime.canvasDirty = true;
     const state = runtime.state;
     updateTopBar(state);
     updateNavigation(state);
@@ -67,6 +150,7 @@ namespace SCPGame {
     }
     document.querySelectorAll<HTMLElement>("[data-speed]").forEach((button) => {
       button.classList.toggle("active", Number(button.dataset.speed) === state.speed);
+      button.setAttribute("aria-pressed", String(Number(button.dataset.speed) === state.speed));
     });
   }
 
@@ -81,31 +165,32 @@ namespace SCPGame {
     const container = document.getElementById("objective-strip");
     if (!container) return;
     if (state.mode === "sandbox") {
-      container.innerHTML = `<strong>Bac à sable</strong><span>Construisez librement, testez les procédures et déclenchez des exercices depuis le commandement.</span>`;
+      replaceHtmlPreservingInteraction(container, `<strong>Bac à sable</strong><span>Construisez librement, testez les procédures et déclenchez des exercices depuis le commandement.</span>`);
       return;
     }
     const chapter = state.campaign[state.currentChapter];
     if (!chapter) return;
     const current = chapter.objectives.find((objective) => !objective.complete) ?? chapter.objectives[chapter.objectives.length - 1];
-    container.innerHTML = `
+    replaceHtmlPreservingInteraction(container, `
       <strong>${escapeHtml(chapter.title)}</strong>
       <span>${escapeHtml(current.title)} — ${escapeHtml(current.description)}</span>
       <div class="objective-progress"><i style="width:${clamp(current.progress / current.target * 100, 0, 100)}%"></i></div>
       <small>${round(current.progress, 1)} / ${current.target}</small>
-    `;
+    `);
   }
 
   function updateRightPanel(runtime: RuntimeState): void {
     const panel = document.getElementById("right-panel");
     if (!panel) return;
     const state = runtime.state;
-    let html = `<div class="panel-heading"><span>${viewLabel(state.view)}</span><button class="icon-button" data-action="help" title="Aide">?</button></div>`;
+    const mobileOpen = panel.classList.contains("mobile-open");
+    let html = `<div class="panel-heading"><span>${viewLabel(state.view)}</span><div class="panel-actions"><button class="panel-toggle" data-action="toggle-panel" aria-expanded="${mobileOpen}" aria-controls="right-panel">${mobileOpen ? "Masquer" : "Détails"}</button><button class="icon-button" data-action="help" title="Aide" aria-label="Ouvrir l'aide">Aide</button></div></div>`;
     if (state.view === "region") html += renderRegionPanel(state);
     else if (state.view === "surface") html += renderSurfacePanel(state);
     else if (state.view === "underground") html += renderUndergroundPanel(state);
     else if (state.view === "command") html += renderCommandPanel(state);
     else html += renderManagementSummary(state);
-    panel.innerHTML = html;
+    replaceHtmlPreservingInteraction(panel, html);
   }
 
   function viewLabel(view: ViewMode): string {
@@ -194,8 +279,8 @@ namespace SCPGame {
         <p class="muted">${escapeHtml(definition.description)}</p>
         ${renderMetricGrid([
           ["État", percent(selected.condition)],
-          ["Confinement", String(definition.containment + selected.upgrades.length)],
-          ["Sécurité", String(definition.security)],
+          ["Confinement", String(getEffectiveRoomContainment(selected))],
+          ["Sécurité", String(getEffectiveRoomSecurity(selected))],
           ["Équipe", String(selected.staffAssigned.length)]
         ])}
         ${scp ? renderContainedScpCard(state, scp) : renderCompatibleTransfers(state, selected)}
@@ -236,10 +321,13 @@ namespace SCPGame {
         </section>
       `;
     }
-    const selected = state.selectedType === "zone" ? state.crisis.zones.find((entry) => entry.id === state.selectedId) : state.crisis.zones.sort((a, b) => b.threat - a.threat)[0];
+    const selected = state.selectedType === "zone" ? state.crisis.zones.find((entry) => entry.id === state.selectedId) : [...state.crisis.zones].sort((a, b) => b.threat - a.threat)[0];
     if (!selected) return "";
     const orders: CrisisOrderType[] = ["lockdown", "evacuate", "deploy-security", "deploy-mtf", "restore-power", "decontaminate", "medical-response", "seal-ventilation", "amnestic-response"];
     return `
+      <div class="zone-selector" role="group" aria-label="Zones de crise">
+        ${state.crisis.zones.map((zone) => `<button data-action="select-zone" data-zone="${zone.id}" aria-pressed="${zone.id === selected.id}"><span>${escapeHtml(zone.name)}</span><b>${Math.round(zone.threat)} %</b></button>`).join("")}
+      </div>
       ${renderSelectionHeader("!", selected.name, `Menace ${Math.round(selected.threat)} %`)}
       ${renderMetricGrid([
         ["Population", String(selected.population)],
@@ -357,6 +445,7 @@ namespace SCPGame {
         ${renderSkill("Médecine", member.skills.medicine)}
       </div>
       <div class="action-row"><button data-action="train-staff" data-staff="${member.id}">Former</button>${member.role !== "director" ? `<button class="danger" data-action="dismiss-staff" data-staff="${member.id}">Renvoyer</button>` : ""}</div>
+      <div class="action-row"><button data-action="set-shift" data-staff="${member.id}" data-shift="day" ${member.shift === "day" ? "disabled" : ""}>Équipe jour</button><button data-action="set-shift" data-staff="${member.id}" data-shift="night" ${member.shift === "night" ? "disabled" : ""}>Équipe nuit</button><button data-action="vet-staff" data-staff="${member.id}">Contrôle interne</button></div>
     `;
   }
 
@@ -400,14 +489,21 @@ namespace SCPGame {
   function updateManagementOverlay(runtime: RuntimeState): void {
     const overlay = document.getElementById("management-overlay");
     if (!overlay) return;
-    if (runtime.state.view !== "management") {
+    const canvas = document.getElementById("game-canvas") as HTMLCanvasElement | null;
+    const managementActive = runtime.state.view === "management";
+    if (canvas) {
+      canvas.inert = managementActive;
+      canvas.tabIndex = managementActive ? -1 : 0;
+      canvas.toggleAttribute("aria-hidden", managementActive);
+    }
+    if (!managementActive) {
       overlay.classList.add("hidden");
       return;
     }
     overlay.classList.remove("hidden");
     const state = runtime.state;
     const tab = String(state.flags["management-tab"] ?? "dashboard");
-    overlay.innerHTML = `
+    replaceHtmlPreservingInteraction(overlay, `
       <div class="management-shell">
         <nav class="management-tabs">
           ${managementTabButton("dashboard", "Tableau de bord", tab)}
@@ -418,9 +514,9 @@ namespace SCPGame {
           ${managementTabButton("reports", "Rapports", tab)}
           ${managementTabButton("settings", "Sauvegarde", tab)}
         </nav>
-        <div class="management-content">${renderManagementTab(state, tab)}</div>
+        <div class="management-content" data-preserve-scroll="management-content">${renderManagementTab(state, tab)}</div>
       </div>
-    `;
+    `);
   }
 
   function managementTabButton(id: string, label: string, active: string): string {
@@ -464,12 +560,12 @@ namespace SCPGame {
         <div class="table-row table-head"><span>Nom</span><span>Rôle</span><span>État</span><span>Moral</span><span>Fatigue</span><span>Actions</span></div>
         ${state.staff.map((member) => `
           <div class="table-row">
-            <span><i class="role-dot" style="background:${roleColor(member.role)}"></i>${escapeHtml(member.name)}<small>Niv. ${member.clearance} · ${member.traits.map(escapeHtml).join(", ")}</small></span>
-            <span>${ROLE_LABELS[member.role]}</span>
-            <span>${escapeHtml(member.status)}</span>
+            <span><i class="role-dot" style="background:${roleColor(member.role)}"></i>${escapeHtml(member.name)}<small>Niv. ${member.clearance} · loyauté ${Math.round(member.loyalty)} · ${member.traits.map(escapeHtml).join(", ")}</small></span>
+            <span>${ROLE_LABELS[member.role]}<small>${member.shift === "day" ? "Jour" : "Nuit"}</small></span>
+            <span>${escapeHtml(member.status)}${member.compromised ? "<small class=\"status-danger\">risque interne</small>" : ""}</span>
             <span>${Math.round(member.needs.morale)}%</span>
             <span>${Math.round(member.needs.fatigue)}%</span>
-            <span><button data-action="select-staff" data-staff="${member.id}">Voir</button><button data-action="train-staff" data-staff="${member.id}">Former</button></span>
+            <span><button data-action="select-staff" data-staff="${member.id}">Voir</button><button data-action="train-staff" data-staff="${member.id}">Former</button><button data-action="vet-staff" data-staff="${member.id}">Vérifier</button></span>
           </div>
         `).join("")}
       </div>
@@ -536,7 +632,7 @@ namespace SCPGame {
       <div class="settings-grid">
         <section><h3>Partie</h3><button class="wide-button" data-action="save">Sauvegarder</button><button class="wide-button" data-action="load">Charger</button><button class="wide-button" data-action="export">Exporter en JSON</button><button class="wide-button" data-action="import">Importer une sauvegarde</button><button class="wide-button danger" data-action="new-game">Nouvelle partie</button></section>
         <section><h3>Accessibilité</h3>${renderToggle("audio", "Audio procédural", state.settings.audio)}${renderToggle("auto-pause", "Pause automatique critique", state.settings.autoPauseCritical)}${renderToggle("reduced-motion", "Mouvements réduits", state.settings.reducedMotion)}${renderToggle("high-contrast", "Contraste renforcé", state.settings.highContrast)}${renderToggle("tutorial", "Conseils contextuels", state.settings.tutorial)}</section>
-        <section><h3>Informations</h3><p>Version ${GAME_VERSION}</p><p>Graine ${state.seed}</p><p>Difficulté ${state.settings.difficulty}</p><p>Mode ${state.mode}</p></section>
+        <section><h3>Informations</h3><p>Version ${GAME_VERSION}</p><p>Graine ${state.seed}</p><p>Difficulté ${state.settings.difficulty}</p><p>Mode ${state.mode}</p><button class="wide-button" data-action="credits">Attribution et licence</button></section>
       </div>
     `;
   }
@@ -561,24 +657,38 @@ namespace SCPGame {
     const currentEvent = state.currentEventId ? state.events.find((entry) => entry.id === state.currentEventId && !entry.resolved) : undefined;
     if (currentEvent) modalMode = "event";
     if (modalMode === "none") {
+      setPageInert(false);
       root.classList.add("hidden");
-      root.innerHTML = "";
+      if (root.innerHTML) root.innerHTML = "";
+      if (renderedModalKey && modalReturnFocus?.isConnected) modalReturnFocus.focus({ preventScroll: true });
+      modalReturnFocus = undefined;
+      renderedModalKey = "";
       return;
     }
+    setPageInert(true);
     root.classList.remove("hidden");
+    root.tabIndex = -1;
+    const modalKey = modalMode === "event" && currentEvent ? `event:${currentEvent.id}` : modalMode === "procedure" ? `procedure:${procedureScpId}:${state.procedures.find((procedure) => procedure.scpId === procedureScpId || state.scps.find((scp) => scp.id === procedureScpId)?.procedureId === procedure.id)?.version ?? 0}` : modalMode;
+    if (modalKey === renderedModalKey) return;
     if (modalMode === "event" && currentEvent) root.innerHTML = renderEventModal(state, currentEvent);
     else if (modalMode === "procedure") root.innerHTML = renderProcedureModal(state, procedureScpId);
     else if (modalMode === "import") root.innerHTML = renderImportModal();
     else if (modalMode === "new-game") root.innerHTML = renderNewGameModal();
     else if (modalMode === "help") root.innerHTML = renderHelpModal();
+    else if (modalMode === "credits") root.innerHTML = renderCreditsModal();
     else {
       modalMode = "none";
       root.classList.add("hidden");
+      renderedModalKey = "";
+      return;
     }
+    renderedModalKey = modalKey;
+    root.setAttribute("aria-labelledby", root.querySelector("h2")?.id || "modal-title");
+    window.setTimeout(() => (root.querySelector<HTMLElement>("button, input, select, textarea") ?? root).focus?.(), 0);
   }
 
   function renderEventModal(state: GameState, event: GameEvent): string {
-    return `<div class="modal-card event-modal ${event.severity}"><header><span>${event.severity.toUpperCase()}</span><h2>${escapeHtml(event.title)}</h2></header><p>${escapeHtml(event.body)}</p><div class="event-choices">${event.choices.map((choice) => `<button data-action="event-choice" data-event="${event.id}" data-choice="${choice.id}"><strong>${escapeHtml(choice.label)}</strong><span>${escapeHtml(choice.description)}</span>${choice.cost ? `<small>${escapeHtml(costToString(choice.cost))}</small>` : ""}</button>`).join("")}</div></div>`;
+    return `<div class="modal-card event-modal ${event.severity}"><header><span>${event.severity.toUpperCase()}</span><h2 id="modal-title">${escapeHtml(event.title)}</h2></header><p>${escapeHtml(event.body)}</p><div class="event-choices">${event.choices.map((choice) => `<button data-action="event-choice" data-event="${event.id}" data-choice="${choice.id}"><strong>${escapeHtml(choice.label)}</strong><span>${escapeHtml(choice.description)}</span>${choice.cost ? `<small>${escapeHtml(costToString(choice.cost))}</small>` : ""}</button>`).join("")}</div></div>`;
   }
 
   function renderProcedureModal(state: GameState, scpId: string): string {
@@ -587,28 +697,31 @@ namespace SCPGame {
     const definition = getSCPDefinition(scp.definitionId);
     const procedure = state.procedures.find((entry) => entry.id === scp.procedureId);
     if (!procedure) return `<div class="modal-card"><p>Procédure introuvable.</p><button data-action="close-modal">Fermer</button></div>`;
+    const requiredStaff = Object.values(definition.requirements.staff).reduce((sum, count) => sum + (count ?? 0), 0);
+    const minimumTraining = clamp(18 + definition.risk * 4, 20, 78);
+    const assignedActual = state.undergroundRooms.find((room) => room.id === scp.roomId)?.staffAssigned.length ?? 0;
     return `
       <div class="modal-card procedure-modal">
-        <header><div><span>PROCÉDURE v${procedure.version}</span><h2>${definition.designation} — ${escapeHtml(definition.name)}</h2></div><button data-action="close-modal">×</button></header>
+        <header><div><span>PROCÉDURE v${procedure.version}</span><h2 id="modal-title">${definition.designation} — ${escapeHtml(definition.name)}</h2></div><button data-action="close-modal" aria-label="Fermer">×</button></header>
         <p>${escapeHtml(definition.uniqueRule)}</p>
         <div class="procedure-layout">
           <section>
             ${renderRange("observationLevel", "Niveau d'observation", procedure.observationLevel)}
-            ${renderRange("assignedStaff", "Effectif prévu", procedure.assignedStaff, 0, 12)}
-            ${renderRange("maintenanceFrequency", "Fréquence de maintenance", procedure.maintenanceFrequency)}
-            ${renderRange("trainingRequired", "Formation exigée", procedure.trainingRequired)}
-            ${renderRange("complexity", "Complexité documentaire", procedure.complexity)}
+            ${renderRange("assignedStaff", "Effectif prévu", procedure.assignedStaff, requiredStaff, Math.min(18, requiredStaff + 3))}
+            ${renderRange("maintenanceFrequency", "Fréquence de maintenance", procedure.maintenanceFrequency, 20, 100)}
+            ${renderRange("trainingRequired", "Formation exigée", procedure.trainingRequired, minimumTraining, 100)}
+            ${renderMetricGrid([["Effectif réel", `${assignedActual} / ${procedure.assignedStaff}`], ["Complexité calculée", percent(procedure.complexity)]])}
           </section>
           <section class="procedure-checks">
-            ${procedureCheck("backupPower", "Alimentation de secours", procedure.backupPower)}
-            ${procedureCheck("analogBackup", "Sauvegarde analogique", procedure.analogBackup)}
-            ${procedureCheck("biometricMonitoring", "Suivi biométrique", procedure.biometricMonitoring)}
-            ${procedureCheck("opticalMonitoring", "Surveillance optique", procedure.opticalMonitoring)}
-            ${procedureCheck("automatedLockdown", "Verrouillage automatique", procedure.automatedLockdown)}
-            ${procedureCheck("humaneCare", "Conditions coopératives", procedure.humaneCare)}
-            ${procedureCheck("restrictedTesting", "Tests strictement autorisés", procedure.restrictedTesting)}
-            ${procedureCheck("isolatedNetwork", "Réseau isolé", procedure.isolatedNetwork)}
-            ${procedureCheck("redundantVentilation", "Ventilation redondante", procedure.redundantVentilation)}
+            ${procedureCheck(state, "backupPower", "Alimentation de secours", procedure.backupPower)}
+            ${procedureCheck(state, "analogBackup", "Sauvegarde analogique", procedure.analogBackup)}
+            ${procedureCheck(state, "biometricMonitoring", "Suivi biométrique", procedure.biometricMonitoring)}
+            ${procedureCheck(state, "opticalMonitoring", "Surveillance optique", procedure.opticalMonitoring)}
+            ${procedureCheck(state, "automatedLockdown", "Verrouillage automatique", procedure.automatedLockdown)}
+            ${procedureCheck(state, "humaneCare", "Conditions coopératives", procedure.humaneCare)}
+            ${procedureCheck(state, "restrictedTesting", "Tests strictement autorisés", procedure.restrictedTesting)}
+            ${procedureCheck(state, "isolatedNetwork", "Réseau isolé", procedure.isolatedNetwork)}
+            ${procedureCheck(state, "redundantVentilation", "Ventilation redondante", procedure.redundantVentilation)}
           </section>
         </div>
         <label class="notes-field">Notes et addenda<textarea id="procedure-notes">${escapeHtml(procedure.notes)}</textarea></label>
@@ -621,20 +734,28 @@ namespace SCPGame {
     return `<label class="range-row"><span>${escapeHtml(label)} <b data-range-value="${String(key)}">${Math.round(value)}</b></span><input type="range" min="${min}" max="${max}" value="${value}" data-procedure-range="${String(key)}"></label>`;
   }
 
-  function procedureCheck(key: keyof ProcedureState, label: string, checked: boolean): string {
-    return `<label><input type="checkbox" data-procedure-check="${String(key)}" ${checked ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`;
+  function procedureCheck(state: GameState, key: keyof ProcedureState, label: string, checked: boolean): string {
+    const unlocked = isProcedureOptionUnlocked(state, key);
+    const unlock = getProcedureOptionUnlock(key);
+    const research = state.researchNodes.find((node) => unlock && node.unlocks.includes(unlock));
+    const lockedLabel = unlocked ? "" : ` — recherche : ${research?.name ?? unlock}`;
+    return `<label title="${escapeHtml(lockedLabel)}"><input type="checkbox" data-procedure-check="${String(key)}" ${checked ? "checked" : ""} ${unlocked ? "" : "disabled"}><span>${escapeHtml(label)}${unlocked ? "" : `<small>${escapeHtml(lockedLabel)}</small>`}</span></label>`;
   }
 
   function renderImportModal(): string {
-    return `<div class="modal-card"><header><h2>Importer une sauvegarde</h2><button data-action="close-modal">×</button></header><p>Sélectionnez un fichier JSON exporté par le jeu.</p><button class="wide-button" data-action="choose-import">Choisir le fichier</button></div>`;
+    return `<div class="modal-card"><header><h2 id="modal-title">Importer une sauvegarde</h2><button data-action="close-modal" aria-label="Fermer">×</button></header><p>Sélectionnez un fichier JSON exporté par le jeu.</p><button class="wide-button" data-action="choose-import">Choisir le fichier</button></div>`;
   }
 
   function renderNewGameModal(): string {
-    return `<div class="modal-card new-game-modal"><header><h2>Nouvelle direction de Site</h2><button data-action="close-modal">×</button></header><label>Mode<select id="new-mode"><option value="campaign">Campagne Deep Protocol</option><option value="sandbox">Bac à sable complet</option></select></label><label>Difficulté<select id="new-difficulty"><option value="story">Narratif</option><option value="standard" selected>Standard</option><option value="director">Directeur</option><option value="keter">Keter</option></select></label><p>La partie actuelle reste disponible seulement si vous la sauvegardez avant de recommencer.</p><button class="wide-button danger" data-action="confirm-new-game">Créer le Site</button></div>`;
+    return `<div class="modal-card new-game-modal"><header><h2 id="modal-title">Nouvelle direction de Site</h2><button data-action="close-modal" aria-label="Fermer">×</button></header><label>Mode<select id="new-mode"><option value="campaign">Campagne Deep Protocol</option><option value="sandbox">Bac à sable complet</option></select></label><label>Difficulté<select id="new-difficulty"><option value="story">Narratif</option><option value="standard" selected>Standard</option><option value="director">Directeur</option><option value="keter">Keter</option></select></label><p>La partie actuelle reste disponible seulement si vous la sauvegardez avant de recommencer.</p><button class="wide-button danger" data-action="confirm-new-game">Créer le Site</button></div>`;
   }
 
   function renderHelpModal(): string {
-    return `<div class="modal-card help-modal"><header><h2>Manuel opérationnel</h2><button data-action="close-modal">×</button></header><div class="help-grid"><section><h3>1. Région</h3><p>Construisez une couverture cohérente, sécurisez les accès et produisez énergie, eau et fournitures.</p></section><section><h3>2. Surface</h3><p>Placez les salles, maîtrisez les files et évitez que le personnel épuisé compromette les opérations.</p></section><section><h3>3. Sous-sol</h3><p>Construisez une cellule adaptée, transférez le SCP puis révisez sa procédure selon les risques réels.</p></section><section><h3>4. Crise</h3><p>Sélectionnez une zone et combinez verrouillage, évacuation, sécurité, FTM, énergie et décontamination.</p></section></div><p><kbd>1</kbd> Région · <kbd>2</kbd> Surface · <kbd>3</kbd> Sous-sol · <kbd>4</kbd> Commandement · <kbd>5</kbd> Gestion · <kbd>Espace</kbd> Pause · <kbd>Échap</kbd> Annuler</p></div>`;
+    return `<div class="modal-card help-modal"><header><h2 id="modal-title">Manuel opérationnel</h2><button data-action="close-modal" aria-label="Fermer">×</button></header><div class="help-grid"><section><h3>1. Région</h3><p>Construisez une couverture cohérente, sécurisez les accès et produisez énergie, eau et fournitures.</p></section><section><h3>2. Surface</h3><p>Placez les salles, maîtrisez les files et évitez que le personnel épuisé compromette les opérations.</p></section><section><h3>3. Sous-sol</h3><p>Construisez une cellule adaptée, transférez le SCP puis révisez sa procédure selon les risques réels.</p></section><section><h3>4. Crise</h3><p>Sélectionnez une zone et combinez verrouillage, évacuation, sécurité, FTM, énergie et décontamination.</p></section></div><p><kbd>1</kbd> Région · <kbd>2</kbd> Surface · <kbd>3</kbd> Sous-sol · <kbd>4</kbd> Commandement · <kbd>5</kbd> Gestion · <kbd>Espace</kbd> Pause · <kbd>Échap</kbd> Annuler</p><button class="wide-button" data-action="credits">Attribution et licence</button></div>`;
+  }
+
+  function renderCreditsModal(): string {
+    return `<div class="modal-card help-modal"><header><h2 id="modal-title">Attribution et licence</h2><button data-action="close-modal" aria-label="Fermer">×</button></header><p>SCP Foundation: Site Director est une adaptation non officielle de l'univers SCP Foundation. Le jeu, son code, ses textes dérivés et ses assets originaux sont distribués sous Creative Commons Attribution-ShareAlike 3.0.</p><div class="help-grid"><section><h3>Sources SCP</h3><p>Contenus de référence issus du SCP Wiki pour SCP-008, SCP-049, SCP-087, SCP-096, SCP-106, SCP-131, SCP-173, SCP-294, SCP-682, SCP-914, SCP-939 et SCP-999. Les auteurs et liens détaillés restent disponibles hors ligne.</p></section><section><h3>Assets</h3><p>Aucun visuel officiel du wiki SCP n'est copié. L'interface, les symboles, les rendus Canvas et l'audio sont originaux ou générés procéduralement pour ce jeu.</p></section></div><p><a href="./ATTRIBUTION.md" target="_blank" rel="noopener noreferrer">Attributions détaillées</a> · <a href="./LICENSE.md" target="_blank" rel="noopener noreferrer">Avis de licence</a> · <a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener noreferrer">Texte CC BY-SA 3.0</a> · <a href="https://github.com/darknigthmare/scp-foundation-site-director" target="_blank" rel="noopener noreferrer">Code source</a></p></div>`;
   }
 
   function updateEndScreen(state: GameState): void {
@@ -642,11 +763,17 @@ namespace SCPGame {
     if (!root) return;
     if (!state.gameOver && !state.victory) {
       root.classList.add("hidden");
-      root.innerHTML = "";
+      if (root.innerHTML) root.innerHTML = "";
+      renderedEndScreenKey = "";
+      setPageInert(modalMode !== "none");
       return;
     }
+    const key = state.victory ? "victory" : "game-over";
+    if (renderedEndScreenKey === key) return;
     root.classList.remove("hidden");
-    root.innerHTML = `<div><span>${state.victory ? "MANDAT ACCOMPLI" : "DIRECTION RÉVOQUÉE"}</span><h1>${state.victory ? "SITE DEEP PROTOCOL" : "RUPTURE DU VOILE"}</h1><p>${state.victory ? "Votre installation est devenue un modèle régional capable de contenir les menaces terminales." : "Le Site ne peut plus poursuivre son activité sous cette couverture."}</p><button data-action="new-game">Nouvelle partie</button><button data-action="load">Charger</button></div>`;
+    root.innerHTML = `<div><span>${state.victory ? "MANDAT ACCOMPLI" : "DIRECTION RÉVOQUÉE"}</span><h1>${state.victory ? "SITE DEEP PROTOCOL" : "RUPTURE DU VOILE"}</h1><p>${state.victory ? "Votre installation est devenue un modèle régional capable de contenir les menaces terminales." : "Le Site ne peut plus poursuivre son activité sous cette couverture."}</p>${state.victory ? `<button data-action="continue-after-victory">Continuer le Site</button>` : ""}<button data-action="new-game">Nouvelle partie</button><button data-action="load">Charger</button></div>`;
+    renderedEndScreenKey = key;
+    setPageInert(modalMode !== "none");
   }
 
   function handleDelegatedClick(event: MouseEvent): void {
@@ -669,12 +796,21 @@ namespace SCPGame {
 
     const action = target.dataset.action;
     if (!action) return;
+    if (["help", "open-procedure", "import", "new-game", "credits"].includes(action)) prepareModal(state, target);
     let result: { ok: boolean; message: string } | undefined;
 
     switch (action) {
       case "pause": togglePause(state); break;
       case "help": modalMode = "help"; break;
-      case "close-modal": modalMode = "none"; if (!state.currentEventId) state.speed = state.previousSpeed || 1; break;
+      case "close-modal": closeModal(state); break;
+      case "toggle-panel": {
+        const panel = document.getElementById("right-panel");
+        const open = !panel?.classList.contains("mobile-open");
+        panel?.classList.toggle("mobile-open", open);
+        target.setAttribute("aria-expanded", String(open));
+        target.textContent = open ? "Masquer" : "Détails";
+        break;
+      }
       case "build": startBuild(state, target.dataset.layer as Layer, target.dataset.type as BuildType); break;
       case "cancel-build": cancelBuild(state); break;
       case "upgrade-selected": result = upgradeSelected(state); break;
@@ -688,21 +824,24 @@ namespace SCPGame {
       }
       case "hire-staff": result = hireStaff(state, target.dataset.role as StaffRole); break;
       case "train-staff": result = trainStaff(state, String(target.dataset.staff)); break;
+      case "set-shift": result = setStaffShift(state, String(target.dataset.staff), target.dataset.shift === "night" ? "night" : "day"); break;
+      case "vet-staff": result = vetStaff(state, String(target.dataset.staff)); break;
       case "dismiss-staff": result = dismissStaff(state, String(target.dataset.staff)); break;
       case "research": result = researchNode(state, String(target.dataset.node)); break;
       case "transfer-scp": result = transferSCP(state, String(target.dataset.scp), String(target.dataset.room)); break;
       case "focus-scp": focusSCPForTransfer(state, String(target.dataset.scp)); break;
-      case "open-procedure": procedureScpId = String(target.dataset.scp); modalMode = "procedure"; state.speed = 0; break;
-      case "save-procedure": result = saveProcedureFromModal(state, String(target.dataset.scp)); if (result.ok) modalMode = "none"; break;
-      case "event-choice": result = resolveEventChoice(state, String(target.dataset.event), String(target.dataset.choice)); modalMode = "none"; break;
+      case "open-procedure": procedureScpId = String(target.dataset.scp); modalMode = "procedure"; break;
+      case "save-procedure": result = saveProcedureFromModal(state, String(target.dataset.scp)); if (result.ok) closeModal(state); break;
+      case "event-choice": result = resolveEventChoice(state, String(target.dataset.event), String(target.dataset.choice)); modalMode = "none"; modalPausedGame = false; break;
       case "management-tab": state.flags["management-tab"] = String(target.dataset.tab); break;
       case "crisis-order": result = issueCrisisOrder(state, target.dataset.order as CrisisOrderType, String(target.dataset.zone)); break;
+      case "select-zone": state.selectedId = String(target.dataset.zone); state.selectedType = "zone"; break;
       case "resume-crisis": togglePause(state); break;
       case "start-drill": startCrisis(state, String(target.dataset.drill)); break;
       case "ack-crisis": state.crisis = createEmptyCrisis(); break;
       case "save": result = { ok: saveGame(state), message: "Sauvegarde locale enregistrée." }; break;
       case "load": {
-        const loaded = loadGame(false) ?? loadGame(true);
+        const loaded = loadLatestGame();
         if (loaded) { runtime.state = loaded; activeRuntime.state = loaded; hideStartScreen(); result = { ok: true, message: "Sauvegarde chargée." }; }
         else result = { ok: false, message: "Aucune sauvegarde disponible." };
         break;
@@ -712,6 +851,8 @@ namespace SCPGame {
       case "choose-import": document.getElementById("import-file")?.click(); break;
       case "new-game": modalMode = "new-game"; break;
       case "confirm-new-game": createGameFromModal(runtime); break;
+      case "continue-after-victory": continueAfterVictory(state); break;
+      case "credits": modalMode = "credits"; break;
       case "open-notifications": openNotifications(state); break;
     }
 
@@ -732,6 +873,7 @@ namespace SCPGame {
     if (key === "high-contrast") { state.settings.highContrast = input.checked; document.body.classList.toggle("high-contrast", input.checked); }
     if (key === "tutorial") state.settings.tutorial = input.checked;
     activeRuntime.uiDirty = true;
+    activeRuntime.canvasDirty = true;
   }
 
   function handleDelegatedInput(event: Event): void {
@@ -744,16 +886,52 @@ namespace SCPGame {
 
   function handleKeyboard(event: KeyboardEvent): void {
     if (!activeRuntime) return;
-    if ((event.target as HTMLElement).matches("input, textarea, select")) return;
     const state = activeRuntime.state;
+    if (modalMode !== "none") {
+      if (event.key === "Tab") trapModalFocus(event);
+      else if (event.key === "Escape" && modalMode !== "event") {
+        event.preventDefault();
+        closeModal(state);
+        activeRuntime.uiDirty = true;
+        refreshUI(activeRuntime, true);
+      }
+      return;
+    }
+    if (!document.getElementById("start-screen")?.classList.contains("hidden")) return;
+    const target = event.target as HTMLElement;
+    if (target.closest("button, a, input, textarea, select, [contenteditable='true']")) return;
     const views: Record<string, ViewMode> = { "1": "region", "2": "surface", "3": "underground", "4": "command", "5": "management" };
+    let handled = true;
     if (views[event.key]) setView(state, views[event.key]);
     else if (event.code === "Space") { event.preventDefault(); togglePause(state); }
-    else if (event.key === "Escape") { cancelBuild(state); modalMode = "none"; }
+    else if (event.key === "Escape") cancelBuild(state);
     else if (event.key === "+" || event.key === "=") setSpeed(state, Math.min(4, state.speed === 0 ? 1 : state.speed * 2) as GameSpeed);
     else if (event.key === "-") setSpeed(state, Math.max(0, state.speed / 2) as GameSpeed);
+    else handled = false;
+    if (!handled) return;
     activeRuntime.uiDirty = true;
     refreshUI(activeRuntime, true);
+  }
+
+  function trapModalFocus(event: KeyboardEvent): void {
+    const root = document.getElementById("modal-root");
+    if (!root) return;
+    const focusable = Array.from(root.querySelectorAll<HTMLElement>("button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"))
+      .filter((element) => !element.classList.contains("hidden"));
+    if (focusable.length === 0) {
+      event.preventDefault();
+      root.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   function handleImportFile(event: Event): void {
@@ -766,6 +944,7 @@ namespace SCPGame {
       if (imported && activeRuntime) {
         activeRuntime.state = imported;
         modalMode = "none";
+        modalPausedGame = false;
         showToast("Sauvegarde importée.", "success");
         refreshUI(activeRuntime, true);
       } else showToast("Fichier incompatible.", "error");
@@ -808,8 +987,8 @@ namespace SCPGame {
     const difficulty = (document.getElementById("new-difficulty") as HTMLSelectElement | null)?.value as Difficulty;
     runtime.state = createNewGame(mode || "campaign", difficulty || "standard");
     modalMode = "none";
+    modalPausedGame = false;
     hideStartScreen();
-    saveGame(runtime.state, true);
     showToast("Nouveau Site créé.", "success");
   }
 
@@ -824,7 +1003,8 @@ namespace SCPGame {
     if (!toast) return;
     toast.textContent = message;
     toast.className = `toast ${type} visible`;
-    window.setTimeout(() => toast.classList.remove("visible"), 2600);
+    toast.setAttribute("role", type === "error" ? "alert" : "status");
+    window.setTimeout(() => toast.classList.remove("visible"), type === "error" ? 6000 : 3200);
   }
 
   function setText(id: string, value: string): void {

@@ -1,4 +1,16 @@
 namespace SCPGame {
+  const CONTAINMENT_ROOM_TAGS = ["safe", "euclid", "keter", "humanoid", "bio", "infohazard", "heavy", "temporal"];
+  const LOAD_SCHEMA_VERSION = 2;
+  const PROCEDURE_OPTION_UNLOCKS: Partial<Record<keyof ProcedureState, string>> = {
+    backupPower: "backup-power",
+    analogBackup: "analog-backup",
+    biometricMonitoring: "biometric-monitoring",
+    automatedLockdown: "automated-lockdown",
+    humaneCare: "humane-care",
+    isolatedNetwork: "isolated-network",
+    redundantVentilation: "biological-control"
+  };
+
   export function createEmptyCrisis(): CrisisState {
     return {
       active: false,
@@ -18,23 +30,24 @@ namespace SCPGame {
 
   export function createDefaultProcedure(scpId: string): ProcedureState {
     const definition = getSCPDefinition(scpId);
+    const isEarlySafe = definition.objectClass === "Safe" && definition.risk <= 4;
     return {
       id: uid("proc"),
       scpId,
       version: 1,
-      observationLevel: definition.requirements.procedureFlags.includes("observation") ? 70 : 45,
-      assignedStaff: Object.values(definition.requirements.staff).reduce((sum, count) => sum + (count ?? 0), 0),
-      maintenanceFrequency: definition.objectClass === "Keter" ? 80 : 55,
-      backupPower: definition.requirements.procedureFlags.includes("backup-power"),
-      analogBackup: definition.requirements.procedureFlags.includes("analog-backup"),
-      biometricMonitoring: definition.requirements.procedureFlags.includes("biometric-monitoring"),
+      observationLevel: definition.requirements.procedureFlags.includes("observation") ? 58 : 38,
+      assignedStaff: Math.max(1, Object.values(definition.requirements.staff).reduce((sum, count) => sum + (count ?? 0), 0) - 1),
+      maintenanceFrequency: definition.objectClass === "Keter" ? 62 : isEarlySafe ? 48 : 52,
+      backupPower: false,
+      analogBackup: false,
+      biometricMonitoring: false,
       opticalMonitoring: !definition.requirements.procedureFlags.includes("no-optical"),
-      automatedLockdown: definition.requirements.procedureFlags.includes("automated-lockdown"),
-      humaneCare: definition.requirements.procedureFlags.includes("humane-care"),
-      restrictedTesting: definition.requirements.procedureFlags.includes("restricted-testing"),
-      isolatedNetwork: definition.requirements.procedureFlags.includes("isolated-network"),
-      redundantVentilation: definition.requirements.procedureFlags.includes("redundant-ventilation"),
-      trainingRequired: definition.requirements.procedureFlags.includes("training") ? 65 : 35,
+      automatedLockdown: false,
+      humaneCare: false,
+      restrictedTesting: false,
+      isolatedNetwork: false,
+      redundantVentilation: false,
+      trainingRequired: definition.requirements.procedureFlags.includes("training") ? 48 : 28,
       notes: `Procédure initiale générée pour ${definition.designation}. À réviser après observation et incident.`,
       compliance: 50,
       complexity: 40
@@ -269,6 +282,7 @@ namespace SCPGame {
 
     const state: GameState = {
       version: GAME_VERSION,
+      savedAt: Date.now(),
       seed,
       mode,
       settings: {
@@ -362,6 +376,15 @@ namespace SCPGame {
 
   export function isResearchUnlockActive(state: GameState, unlock: string): boolean {
     return state.researchNodes.some((node) => node.completed && node.unlocks.includes(unlock));
+  }
+
+  export function getProcedureOptionUnlock(key: keyof ProcedureState): string | undefined {
+    return PROCEDURE_OPTION_UNLOCKS[key];
+  }
+
+  export function isProcedureOptionUnlocked(state: GameState, key: keyof ProcedureState): boolean {
+    const unlock = getProcedureOptionUnlock(key);
+    return !unlock || isResearchUnlockActive(state, unlock);
   }
 
   export function isRegionDefinitionUnlocked(state: GameState, definition: RegionFacilityDefinition): boolean {
@@ -576,17 +599,23 @@ namespace SCPGame {
 
   export function repairSelected(state: GameState): { ok: boolean; message: string } {
     if (!state.selectedId || !state.selectedType) return { ok: false, message: "Aucun élément sélectionné." };
+    const target = state.selectedType === "facility"
+      ? state.regionFacilities.find((entry) => entry.id === state.selectedId)
+      : state.selectedType === "surface-room"
+        ? state.surfaceRooms.find((entry) => entry.id === state.selectedId)
+        : state.selectedType === "underground-room"
+          ? state.undergroundRooms.find((entry) => entry.id === state.selectedId)
+          : undefined;
+    if (!target) return { ok: false, message: "Élément introuvable." };
     const cost = { funds: 800, parts: 3 };
     if (!payCost(state.resources, cost)) return { ok: false, message: "Ressources insuffisantes." };
     if (state.selectedType === "facility") {
-      const item = state.regionFacilities.find((entry) => entry.id === state.selectedId);
-      if (item) item.condition = 100;
+      target.condition = 100;
     } else if (state.selectedType === "surface-room") {
-      const item = state.surfaceRooms.find((entry) => entry.id === state.selectedId);
-      if (item) { item.condition = 100; item.cleanliness = 100; }
+      target.condition = 100;
+      (target as SurfaceRoom).cleanliness = 100;
     } else if (state.selectedType === "underground-room") {
-      const item = state.undergroundRooms.find((entry) => entry.id === state.selectedId);
-      if (item) item.condition = 100;
+      target.condition = 100;
     }
     return { ok: true, message: "Maintenance corrective terminée." };
   }
@@ -629,7 +658,8 @@ namespace SCPGame {
   export function autoAssignStaff(state: GameState): void {
     state.surfaceRooms.forEach((room) => room.staffAssigned = []);
     state.undergroundRooms.forEach((room) => room.staffAssigned = []);
-    const available = state.staff.filter((member) => member.status !== "dead" && member.status !== "quarantined");
+    const unavailable: StaffStatus[] = ["dead", "quarantined", "injured", "training"];
+    const available = state.staff.filter((member) => !unavailable.includes(member.status));
     const assigned = new Set<string>();
 
     const assignRole = (roomId: string, role: StaffRole, count: number, underground = false): void => {
@@ -675,6 +705,7 @@ namespace SCPGame {
   export function trainStaff(state: GameState, staffId: string): { ok: boolean; message: string } {
     const member = state.staff.find((entry) => entry.id === staffId);
     if (!member) return { ok: false, message: "Personnel introuvable." };
+    if (["dead", "quarantined", "injured", "training"].includes(member.status)) return { ok: false, message: "Ce membre n'est pas disponible pour une formation." };
     const trainingRoom = state.surfaceRooms.find((room) => room.type === "training" && room.enabled);
     const briefingRoom = state.surfaceRooms.find((room) => room.type === "briefing" && room.enabled);
     if (!trainingRoom && !briefingRoom) return { ok: false, message: "Construisez un centre de formation ou une salle de briefing." };
@@ -683,12 +714,40 @@ namespace SCPGame {
     member.status = "training";
     member.taskProgress = 0;
     member.targetRoomId = trainingRoom?.id ?? briefingRoom?.id;
-    member.experience = clamp(member.experience + 8, 0, 100);
-    Object.keys(member.skills).forEach((key) => {
-      const skill = key as keyof SkillSet;
-      member.skills[skill] = clamp(member.skills[skill] + (member.role === "researcher" && skill === "research" ? 7 : 2), 0, 100);
-    });
+    autoAssignStaff(state);
     return { ok: true, message: `${member.name} suit une formation spécialisée.` };
+  }
+
+  export function setStaffShift(state: GameState, staffId: string, shift: "day" | "night"): { ok: boolean; message: string } {
+    const member = state.staff.find((entry) => entry.id === staffId);
+    if (!member) return { ok: false, message: "Personnel introuvable." };
+    if (member.role === "director") return { ok: false, message: "Le directeur conserve une astreinte permanente." };
+    member.shift = shift;
+    member.needs.stress = clamp(member.needs.stress + 2, 0, 100);
+    autoAssignStaff(state);
+    return { ok: true, message: `${member.name} passe en équipe de ${shift === "day" ? "jour" : "nuit"}.` };
+  }
+
+  export function vetStaff(state: GameState, staffId: string): { ok: boolean; message: string } {
+    const member = state.staff.find((entry) => entry.id === staffId);
+    if (!member) return { ok: false, message: "Personnel introuvable." };
+    const cost = { funds: 700, intel: 1 };
+    if (!payCost(state.resources, cost)) return { ok: false, message: "Ressources insuffisantes." };
+    const threatNeutralized = member.compromised;
+    member.loyalty = clamp(member.loyalty + 8, 0, 100);
+    member.compromised = false;
+    member.needs.stress = clamp(member.needs.stress + 4, 0, 100);
+    state.reputation.personnel = clamp(state.reputation.personnel - 0.4, 0, 100);
+    if (threatNeutralized) {
+      state.resources.intel += 4;
+      state.reputation.command = clamp(state.reputation.command + 2, 0, 100);
+      state.reputation.suspicion = clamp(state.reputation.suspicion - 2, 0, 100);
+      addNotification(state, "Menace interne neutralisée", `${member.name} a été isolé du réseau opérationnel puis revalidé.`, "major");
+      logHistory(state, `Contrôle de sécurité : compromission de ${member.name} neutralisée.`);
+      return { ok: true, message: `Compromission détectée et neutralisée chez ${member.name}.` };
+    }
+    logHistory(state, `Contrôle de sécurité préventif terminé pour ${member.name}.`);
+    return { ok: true, message: `${member.name} a été revalidé, aucun indicateur hostile.` };
   }
 
   export function researchNode(state: GameState, nodeId: string): { ok: boolean; message: string } {
@@ -709,19 +768,56 @@ namespace SCPGame {
     if (!scp) return { ok: false, message: "SCP introuvable." };
     const procedure = state.procedures.find((entry) => entry.id === scp.procedureId);
     if (!procedure) return { ok: false, message: "Procédure introuvable." };
-    Object.assign(procedure, updates);
+    const definition = getSCPDefinition(scp.definitionId);
+    const requiredStaff = Object.values(definition.requirements.staff).reduce((sum, count) => sum + (count ?? 0), 0);
+    const minimumTraining = clamp(18 + definition.risk * 4, 20, 78);
+    const booleanKeys = ["backupPower", "analogBackup", "biometricMonitoring", "opticalMonitoring", "automatedLockdown", "humaneCare", "restrictedTesting", "isolatedNetwork", "redundantVentilation"] as Array<keyof ProcedureState>;
+    const lockedOption = booleanKeys.find((key) => updates[key] === true && !isProcedureOptionUnlocked(state, key));
+    if (lockedOption) {
+      const unlock = getProcedureOptionUnlock(lockedOption);
+      const research = state.researchNodes.find((node) => unlock && node.unlocks.includes(unlock));
+      return { ok: false, message: `Recherche requise : ${research?.name ?? unlock ?? "doctrine avancée"}.` };
+    }
+    const observation = Number(updates.observationLevel);
+    const assigned = Number(updates.assignedStaff);
+    const maintenance = Number(updates.maintenanceFrequency);
+    const training = Number(updates.trainingRequired);
+    if (Number.isFinite(observation)) procedure.observationLevel = clamp(Math.round(observation), 0, 100);
+    if (Number.isFinite(assigned)) procedure.assignedStaff = clamp(Math.round(assigned), requiredStaff, Math.min(18, requiredStaff + 3));
+    if (Number.isFinite(maintenance)) procedure.maintenanceFrequency = clamp(Math.round(maintenance), 20, 100);
+    if (Number.isFinite(training)) procedure.trainingRequired = clamp(Math.round(training), minimumTraining, 100);
+    booleanKeys.forEach((key) => {
+      if (typeof updates[key] === "boolean") (procedure as unknown as Record<string, boolean>)[key] = Boolean(updates[key]);
+    });
+    if (typeof updates.notes === "string") procedure.notes = updates.notes;
+    const enabledOptions = booleanKeys.filter((key) => Boolean((procedure as unknown as Record<string, unknown>)[key])).length;
+    procedure.complexity = clamp(Math.round(24 + definition.risk * 3.2 + enabledOptions * 3 + procedure.observationLevel * 0.08 + procedure.maintenanceFrequency * 0.05), 25, 100);
     procedure.version += 1;
     procedure.notes = sanitizeText(procedure.notes);
     logHistory(state, `Procédure ${getSCPDefinition(scp.definitionId).designation} révisée en version ${procedure.version}.`);
     return { ok: true, message: `Procédure v${procedure.version} enregistrée.` };
   }
 
+  export function getEffectiveRoomContainment(room: UndergroundRoom): number {
+    return getUndergroundDefinition(room.type).containment + room.upgrades.length;
+  }
+
+  export function getEffectiveRoomSecurity(room: UndergroundRoom): number {
+    return getUndergroundDefinition(room.type).security + room.upgrades.length;
+  }
+
   export function getCompatibleRooms(state: GameState, scp: SCPInstance): UndergroundRoom[] {
     const definition = getSCPDefinition(scp.definitionId);
     return state.undergroundRooms.filter((room) => {
+      if (room.id === scp.roomId) return false;
       if (room.scpId && room.scpId !== scp.id) return false;
       const roomDefinition = getUndergroundDefinition(room.type);
-      return definition.requirements.roomTags.some((tag) => roomDefinition.tags.includes(tag)) || roomDefinition.containment >= definition.requirements.minContainment;
+      const isContainmentRoom = roomDefinition.tags.some((tag) => CONTAINMENT_ROOM_TAGS.includes(tag));
+      const tagMatch = definition.requirements.roomTags.some((tag) => roomDefinition.tags.includes(tag));
+      return isContainmentRoom
+        && tagMatch
+        && getEffectiveRoomContainment(room) >= definition.requirements.minContainment
+        && getEffectiveRoomSecurity(room) >= definition.requirements.minSecurity;
     });
   }
 
@@ -733,10 +829,16 @@ namespace SCPGame {
     const candidates = getCompatibleRooms(state, scp);
     const room = roomId ? candidates.find((entry) => entry.id === roomId) : candidates[0];
     if (!room) return { ok: false, message: `Aucune cellule compatible avec ${definition.designation}.` };
-    if (!scp.transferred) {
-      const transferCost: Cost = { funds: 1800 + definition.risk * 280, ammo: Math.max(0, Math.floor(definition.risk / 3)), medical: Math.max(0, Math.floor(definition.risk / 5)) };
-      if (!payCost(state.resources, transferCost)) return { ok: false, message: "Ressources insuffisantes pour sécuriser le transfert." };
-    }
+    if (room.id === scp.roomId) return { ok: false, message: `${definition.designation} occupe déjà cette cellule.` };
+    const wasTransferred = scp.transferred;
+    const relocationFactor = wasTransferred ? 0.55 : 1;
+    const transferCost: Cost = {
+      funds: Math.round((1800 + definition.risk * 280) * relocationFactor),
+      ammo: Math.max(0, Math.ceil(definition.risk / (wasTransferred ? 5 : 3))),
+      medical: Math.max(0, Math.ceil(definition.risk / (wasTransferred ? 8 : 5)))
+    };
+    if (!payCost(state.resources, transferCost)) return { ok: false, message: `Ressources insuffisantes pour sécuriser ${wasTransferred ? "la relocalisation" : "le transfert"}.` };
+    const previousRisk = scp.breachRisk;
     if (scp.roomId) {
       const previous = state.undergroundRooms.find((entry) => entry.id === scp.roomId);
       if (previous) previous.scpId = undefined;
@@ -746,7 +848,7 @@ namespace SCPGame {
     scp.contained = true;
     scp.transferred = true;
     scp.activeEffect = "Confinement en stabilisation";
-    scp.breachRisk = Math.max(8, definition.risk * 1.8);
+    scp.breachRisk = wasTransferred ? Math.max(previousRisk, definition.risk * 1.8) : Math.max(8, definition.risk * 1.8);
     autoAssignStaff(state);
     addNotification(state, `${definition.designation} transféré`, `${definition.name} est maintenant au niveau -${room.level + 1}.`, definition.objectClass === "Keter" ? "major" : "info");
     logHistory(state, `${definition.designation} transféré vers ${getUndergroundDefinition(room.type).name}.`);
@@ -755,6 +857,7 @@ namespace SCPGame {
 
   export function saveGame(state: GameState, autosave = false): boolean {
     try {
+      state.savedAt = Date.now();
       const serialized = JSON.stringify(state);
       localStorage.setItem(autosave ? AUTOSAVE_KEY : SAVE_KEY, serialized);
       state.lastAutosave = state.elapsedMinutes;
@@ -769,23 +872,27 @@ namespace SCPGame {
     try {
       const raw = localStorage.getItem(autosave ? AUTOSAVE_KEY : SAVE_KEY);
       if (!raw) return undefined;
-      const state = JSON.parse(raw) as GameState;
-      if (!state.version) return undefined;
-      state.speed = 0;
-      state.previousSpeed = state.previousSpeed || 1;
-      state.buildSelection = undefined;
-      state.currentEventId = undefined;
-      state.camera = state.camera ?? {
-        region: { zoom: 1, offsetX: 0, offsetY: 0 },
-        surface: { zoom: 1, offsetX: 0, offsetY: 0 },
-        underground: { zoom: 1, offsetX: 0, offsetY: 0 },
-        command: { zoom: 1, offsetX: 0, offsetY: 0 },
-        management: { zoom: 1, offsetX: 0, offsetY: 0 }
-      };
-      return state;
+      return normalizeLoadedState(JSON.parse(raw));
     } catch (error) {
       console.error("Échec de chargement", error);
       return undefined;
+    }
+  }
+
+  export function loadLatestGame(): GameState | undefined {
+    const manual = loadGame(false);
+    const auto = loadGame(true);
+    if (!manual) return auto;
+    if (!auto) return manual;
+    return (auto.savedAt || 0) > (manual.savedAt || 0) ? auto : manual;
+  }
+
+  export function hasSavedGame(): boolean {
+    try {
+      return Boolean(localStorage.getItem(SAVE_KEY) || localStorage.getItem(AUTOSAVE_KEY));
+    } catch (error) {
+      console.warn("Stockage local indisponible", error);
+      return false;
     }
   }
 
@@ -795,14 +902,117 @@ namespace SCPGame {
 
   export function importSave(raw: string): GameState | undefined {
     try {
-      const state = JSON.parse(raw) as GameState;
-      if (!state.version || !state.resources || !state.surfaceRooms) throw new Error("Format incompatible");
-      state.speed = 0;
-      state.buildSelection = undefined;
-      return state;
+      if (raw.length > 4_000_000) throw new Error("Sauvegarde trop volumineuse");
+      return normalizeLoadedState(JSON.parse(raw));
     } catch (error) {
       console.error(error);
       return undefined;
     }
+  }
+
+  export function continueAfterVictory(state: GameState): void {
+    state.mode = "sandbox";
+    state.victory = false;
+    state.speed = 0;
+    state.previousSpeed = 1;
+    state.currentChapter = Math.max(state.currentChapter, state.campaign.length - 1);
+    state.researchNodes.forEach((node) => node.completed = true);
+    state.scps.forEach((scp) => scp.discovered = true);
+    addNotification(state, "Mandat prolongé", "Le Site reste jouable en mode bac à sable avec tous les dossiers autorisés.", "info");
+    logHistory(state, "Mandat Deep Protocol prolongé en exploitation libre.");
+  }
+
+  function normalizeLoadedState(candidate: unknown): GameState | undefined {
+    if (!candidate || typeof candidate !== "object") return undefined;
+    const raw = candidate as Partial<GameState>;
+    if (typeof raw.version !== "string") return undefined;
+    const mode = raw.mode === "sandbox" ? "sandbox" : "campaign";
+    const difficulty = ["story", "standard", "director", "keter"].includes(String(raw.settings?.difficulty)) ? raw.settings!.difficulty : "standard";
+    const seed = Number.isFinite(raw.seed) ? Number(raw.seed) : Date.now();
+    const defaults = createNewGame(mode, difficulty, seed);
+    const objectValue = <T extends object>(value: unknown, fallback: T): T => value && typeof value === "object" && !Array.isArray(value) ? { ...fallback, ...(value as Partial<T>) } : fallback;
+    const arrayValue = <T>(value: unknown, fallback: T[]): T[] => Array.isArray(value) && value.every((entry) => entry && typeof entry === "object") ? value as T[] : fallback;
+    const state: GameState = {
+      ...defaults,
+      ...raw,
+      version: GAME_VERSION,
+      seed,
+      mode,
+      settings: objectValue(raw.settings, defaults.settings),
+      resources: objectValue(raw.resources, defaults.resources),
+      reputation: objectValue(raw.reputation, defaults.reputation),
+      regionFacilities: arrayValue<RegionFacility>(raw.regionFacilities, defaults.regionFacilities),
+      surfaceRooms: arrayValue<SurfaceRoom>(raw.surfaceRooms, defaults.surfaceRooms),
+      undergroundRooms: arrayValue<UndergroundRoom>(raw.undergroundRooms, defaults.undergroundRooms),
+      staff: arrayValue<StaffMember>(raw.staff, defaults.staff),
+      workItems: arrayValue<WorkItem>(raw.workItems, defaults.workItems),
+      scps: arrayValue<SCPInstance>(raw.scps, defaults.scps),
+      procedures: arrayValue<ProcedureState>(raw.procedures, defaults.procedures),
+      researchNodes: arrayValue<ResearchNode>(raw.researchNodes, defaults.researchNodes),
+      events: arrayValue<GameEvent>(raw.events, defaults.events),
+      crisis: objectValue(raw.crisis, defaults.crisis),
+      campaign: arrayValue<CampaignChapter>(raw.campaign, defaults.campaign),
+      notifications: arrayValue<Notification>(raw.notifications, defaults.notifications),
+      history: Array.isArray(raw.history) ? raw.history.filter((entry): entry is string => typeof entry === "string").slice(-500) : defaults.history,
+      flags: objectValue(raw.flags, defaults.flags),
+      camera: objectValue(raw.camera, defaults.camera),
+      buildSelection: undefined
+    };
+    state.savedAt = typeof state.savedAt === "number" && Number.isFinite(state.savedAt) ? state.savedAt : Date.now() - Math.max(0, 1_000_000 - (state.elapsedMinutes || 0));
+    state.speed = 0;
+    state.previousSpeed = state.previousSpeed || 1;
+    state.buildSelection = undefined;
+    ["inspection-delayed", "night-overtime", "infiltration-shadowed", "infiltration-contained", "ethics-redacted"].forEach((key) => {
+      const timestamp = Number(state.flags[`${key}:at`]);
+      if (Boolean(state.flags[key]) && !Number.isFinite(timestamp)) state.flags[`${key}:at`] = state.elapsedMinutes;
+    });
+    state.flags["load-schema-version"] = LOAD_SCHEMA_VERSION;
+    if (state.currentEventId && !state.events?.some((event) => event.id === state.currentEventId && !event.resolved)) state.currentEventId = undefined;
+    state.surfaceRooms.forEach((room) => { room.staffAssigned = room.staffAssigned ?? []; room.queue = room.queue ?? []; room.upgrades = room.upgrades ?? []; });
+    state.undergroundRooms.forEach((room) => { room.staffAssigned = room.staffAssigned ?? []; room.upgrades = room.upgrades ?? []; room.enabled = room.enabled !== false; room.sealed = Boolean(room.sealed); });
+    state.staff.forEach((member, index) => {
+      member.path = member.path ?? [];
+      member.pathIndex = member.pathIndex ?? 0;
+      member.shift = member.shift ?? (index % 3 === 0 ? "night" : "day");
+      member.loyalty = clamp(Number(member.loyalty ?? 70), 0, 100);
+      member.compromised = Boolean(member.compromised);
+      member.taskProgress = clamp(Number(member.taskProgress ?? 0), 0, 100);
+    });
+    state.scps = state.scps.filter((scp) => SCP_DEFINITIONS.some((definition) => definition.id === scp.definitionId));
+    defaults.scps.forEach((defaultScp) => {
+      if (!state.scps.some((scp) => scp.definitionId === defaultScp.definitionId)) state.scps.push(defaultScp);
+    });
+    state.scps.forEach((scp) => {
+      let procedure = state.procedures.find((entry) => entry.id === scp.procedureId || entry.scpId === scp.definitionId);
+      if (!procedure) {
+        procedure = createDefaultProcedure(scp.definitionId);
+        state.procedures.push(procedure);
+      }
+      scp.procedureId = procedure.id;
+      (["backupPower", "analogBackup", "biometricMonitoring", "automatedLockdown", "humaneCare", "isolatedNetwork", "redundantVentilation"] as Array<keyof ProcedureState>).forEach((key) => {
+        if (!isProcedureOptionUnlocked(state, key)) (procedure as unknown as Record<string, boolean>)[key] = false;
+      });
+    });
+    state.researchNodes = defaults.researchNodes.map((defaultNode) => {
+      const loaded = state.researchNodes.find((node) => node.id === defaultNode.id);
+      return loaded ? { ...defaultNode, completed: Boolean(loaded.completed) } : defaultNode;
+    });
+    state.campaign = defaults.campaign.map((defaultChapter) => {
+      const loaded = state.campaign.find((chapter) => chapter.id === defaultChapter.id);
+      if (!loaded) return defaultChapter;
+      return {
+        ...defaultChapter,
+        complete: Boolean(loaded.complete),
+        objectives: defaultChapter.objectives.map((defaultObjective) => {
+          const loadedObjective = loaded.objectives?.find((objective) => objective.id === defaultObjective.id);
+          return loadedObjective ? { ...defaultObjective, progress: Number(loadedObjective.progress) || 0, complete: Boolean(loadedObjective.complete) } : defaultObjective;
+        })
+      };
+    });
+    state.crisis.zones = arrayValue<CrisisZone>(state.crisis.zones, []);
+    state.crisis.orders = arrayValue<CrisisOrder>(state.crisis.orders, []);
+    state.crisis.log = Array.isArray(state.crisis.log) ? state.crisis.log.filter((entry): entry is string => typeof entry === "string") : [];
+    autoAssignStaff(state);
+    return state;
   }
 }

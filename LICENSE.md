@@ -4,7 +4,7 @@
 
 Sauf mention contraire dans `ATTRIBUTION.md`, cette œuvre est mise à disposition selon les termes de la licence :
 
-**Creative Commons Attribution-ShareAlike 3.0 Unported — CC BY-SA 3.0**  
+**Creative Commons Attribution-ShareAlike 3.0 Unported — CC BY-SA 3.0**
 https://creativecommons.org/licenses/by-sa/3.0/
 
 Vous êtes autorisé à partager et adapter l’œuvre, y compris commercialement, sous réserve :

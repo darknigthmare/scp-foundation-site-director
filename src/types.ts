@@ -414,6 +414,7 @@ namespace SCPGame {
 
   export interface GameState {
     version: string;
+    savedAt: number;
     seed: number;
     mode: "campaign" | "sandbox";
     settings: GameSettings;
@@ -466,6 +467,7 @@ namespace SCPGame {
     pointerDown: boolean;
     dragStart?: Point;
     uiDirty: boolean;
+    canvasDirty: boolean;
     animationFrame: number;
   }
 }

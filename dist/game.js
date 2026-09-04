@@ -1213,7 +1213,7 @@ var SCPGame;
             description: "Améliore la quarantaine, les traitements et la filtration autonome.",
             cost: 55,
             prerequisites: [],
-            unlocks: ["bio-containment", "air-filtration", "biological-control"],
+            unlocks: ["bio-containment", "air-filtration", "biological-control", "redundant-ventilation"],
             category: "medical"
         },
         {
@@ -1596,9 +1596,9 @@ var SCPGame;
             title: "Directive 00 — La couverture",
             briefing: "Le commandement régional vous confie un ancien complexe industriel. Rendez la surface crédible, organisez les premiers flux et préparez l'accès aux niveaux inférieurs.",
             objectives: [
-                { id: "build-cover", title: "Façade crédible", description: "Construire au moins 5 installations régionales.", progress: 0, target: 5, complete: false, reward: { funds: 5000, intel: 4 }, condition: "region-facilities" },
-                { id: "surface-core", title: "Cœur opérationnel", description: "Disposer d'un accueil, d'un contrôle d'accès, d'une infirmerie, d'un atelier et d'un ascenseur.", progress: 0, target: 5, complete: false, reward: { funds: 4500, parts: 8 }, condition: "surface-core" },
-                { id: "staff-12", title: "Première équipe", description: "Employer au moins 12 personnes actives.", progress: 0, target: 12, complete: false, reward: { funds: 3000, food: 6 }, condition: "staff-count" }
+                { id: "build-cover", title: "Façade crédible", description: "Exploiter au moins 9 installations régionales non routières.", progress: 0, target: 9, complete: false, reward: { funds: 5000, intel: 4 }, condition: "region-facilities" },
+                { id: "surface-core", title: "Cœur opérationnel", description: "Disposer d'accueil, contrôle, infirmerie, atelier, ascenseur, laboratoire, entrepôt et repos.", progress: 0, target: 8, complete: false, reward: { funds: 4500, parts: 8 }, condition: "surface-core" },
+                { id: "staff-20", title: "Première équipe renforcée", description: "Employer au moins 20 personnes actives pour couvrir les rotations.", progress: 0, target: 20, complete: false, reward: { funds: 3000, food: 6 }, condition: "staff-count" }
             ],
             unlockedScps: ["scp-131", "scp-999", "scp-173"],
             rewardText: "Autorisation d'ouverture du premier secteur Euclid.",
@@ -1994,6 +1994,17 @@ var SCPGame;
 })(SCPGame || (SCPGame = {}));
 var SCPGame;
 (function (SCPGame) {
+    const CONTAINMENT_ROOM_TAGS = ["safe", "euclid", "keter", "humanoid", "bio", "infohazard", "heavy", "temporal"];
+    const LOAD_SCHEMA_VERSION = 2;
+    const PROCEDURE_OPTION_UNLOCKS = {
+        backupPower: "backup-power",
+        analogBackup: "analog-backup",
+        biometricMonitoring: "biometric-monitoring",
+        automatedLockdown: "automated-lockdown",
+        humaneCare: "humane-care",
+        isolatedNetwork: "isolated-network",
+        redundantVentilation: "biological-control"
+    };
     function createEmptyCrisis() {
         return {
             active: false,
@@ -2013,23 +2024,24 @@ var SCPGame;
     SCPGame.createEmptyCrisis = createEmptyCrisis;
     function createDefaultProcedure(scpId) {
         const definition = SCPGame.getSCPDefinition(scpId);
+        const isEarlySafe = definition.objectClass === "Safe" && definition.risk <= 4;
         return {
             id: SCPGame.uid("proc"),
             scpId,
             version: 1,
-            observationLevel: definition.requirements.procedureFlags.includes("observation") ? 70 : 45,
-            assignedStaff: Object.values(definition.requirements.staff).reduce((sum, count) => sum + (count ?? 0), 0),
-            maintenanceFrequency: definition.objectClass === "Keter" ? 80 : 55,
-            backupPower: definition.requirements.procedureFlags.includes("backup-power"),
-            analogBackup: definition.requirements.procedureFlags.includes("analog-backup"),
-            biometricMonitoring: definition.requirements.procedureFlags.includes("biometric-monitoring"),
+            observationLevel: definition.requirements.procedureFlags.includes("observation") ? 58 : 38,
+            assignedStaff: Math.max(1, Object.values(definition.requirements.staff).reduce((sum, count) => sum + (count ?? 0), 0) - 1),
+            maintenanceFrequency: definition.objectClass === "Keter" ? 62 : isEarlySafe ? 48 : 52,
+            backupPower: false,
+            analogBackup: false,
+            biometricMonitoring: false,
             opticalMonitoring: !definition.requirements.procedureFlags.includes("no-optical"),
-            automatedLockdown: definition.requirements.procedureFlags.includes("automated-lockdown"),
-            humaneCare: definition.requirements.procedureFlags.includes("humane-care"),
-            restrictedTesting: definition.requirements.procedureFlags.includes("restricted-testing"),
-            isolatedNetwork: definition.requirements.procedureFlags.includes("isolated-network"),
-            redundantVentilation: definition.requirements.procedureFlags.includes("redundant-ventilation"),
-            trainingRequired: definition.requirements.procedureFlags.includes("training") ? 65 : 35,
+            automatedLockdown: false,
+            humaneCare: false,
+            restrictedTesting: false,
+            isolatedNetwork: false,
+            redundantVentilation: false,
+            trainingRequired: definition.requirements.procedureFlags.includes("training") ? 48 : 28,
             notes: `Procédure initiale générée pour ${definition.designation}. À réviser après observation et incident.`,
             compliance: 50,
             complexity: 40
@@ -2280,6 +2292,7 @@ var SCPGame;
         });
         const state = {
             version: SCPGame.GAME_VERSION,
+            savedAt: Date.now(),
             seed,
             mode,
             settings: {
@@ -2375,6 +2388,15 @@ var SCPGame;
         return state.researchNodes.some((node) => node.completed && node.unlocks.includes(unlock));
     }
     SCPGame.isResearchUnlockActive = isResearchUnlockActive;
+    function getProcedureOptionUnlock(key) {
+        return PROCEDURE_OPTION_UNLOCKS[key];
+    }
+    SCPGame.getProcedureOptionUnlock = getProcedureOptionUnlock;
+    function isProcedureOptionUnlocked(state, key) {
+        const unlock = getProcedureOptionUnlock(key);
+        return !unlock || isResearchUnlockActive(state, unlock);
+    }
+    SCPGame.isProcedureOptionUnlocked = isProcedureOptionUnlocked;
     function isRegionDefinitionUnlocked(state, definition) {
         return definition.unlockedAt <= getUnlockTier(state);
     }
@@ -2623,25 +2645,27 @@ var SCPGame;
     function repairSelected(state) {
         if (!state.selectedId || !state.selectedType)
             return { ok: false, message: "Aucun élément sélectionné." };
+        const target = state.selectedType === "facility"
+            ? state.regionFacilities.find((entry) => entry.id === state.selectedId)
+            : state.selectedType === "surface-room"
+                ? state.surfaceRooms.find((entry) => entry.id === state.selectedId)
+                : state.selectedType === "underground-room"
+                    ? state.undergroundRooms.find((entry) => entry.id === state.selectedId)
+                    : undefined;
+        if (!target)
+            return { ok: false, message: "Élément introuvable." };
         const cost = { funds: 800, parts: 3 };
         if (!SCPGame.payCost(state.resources, cost))
             return { ok: false, message: "Ressources insuffisantes." };
         if (state.selectedType === "facility") {
-            const item = state.regionFacilities.find((entry) => entry.id === state.selectedId);
-            if (item)
-                item.condition = 100;
+            target.condition = 100;
         }
         else if (state.selectedType === "surface-room") {
-            const item = state.surfaceRooms.find((entry) => entry.id === state.selectedId);
-            if (item) {
-                item.condition = 100;
-                item.cleanliness = 100;
-            }
+            target.condition = 100;
+            target.cleanliness = 100;
         }
         else if (state.selectedType === "underground-room") {
-            const item = state.undergroundRooms.find((entry) => entry.id === state.selectedId);
-            if (item)
-                item.condition = 100;
+            target.condition = 100;
         }
         return { ok: true, message: "Maintenance corrective terminée." };
     }
@@ -2689,7 +2713,8 @@ var SCPGame;
     function autoAssignStaff(state) {
         state.surfaceRooms.forEach((room) => room.staffAssigned = []);
         state.undergroundRooms.forEach((room) => room.staffAssigned = []);
-        const available = state.staff.filter((member) => member.status !== "dead" && member.status !== "quarantined");
+        const unavailable = ["dead", "quarantined", "injured", "training"];
+        const available = state.staff.filter((member) => !unavailable.includes(member.status));
         const assigned = new Set();
         const assignRole = (roomId, role, count, underground = false) => {
             const candidates = available
@@ -2734,6 +2759,8 @@ var SCPGame;
         const member = state.staff.find((entry) => entry.id === staffId);
         if (!member)
             return { ok: false, message: "Personnel introuvable." };
+        if (["dead", "quarantined", "injured", "training"].includes(member.status))
+            return { ok: false, message: "Ce membre n'est pas disponible pour une formation." };
         const trainingRoom = state.surfaceRooms.find((room) => room.type === "training" && room.enabled);
         const briefingRoom = state.surfaceRooms.find((room) => room.type === "briefing" && room.enabled);
         if (!trainingRoom && !briefingRoom)
@@ -2744,14 +2771,46 @@ var SCPGame;
         member.status = "training";
         member.taskProgress = 0;
         member.targetRoomId = trainingRoom?.id ?? briefingRoom?.id;
-        member.experience = SCPGame.clamp(member.experience + 8, 0, 100);
-        Object.keys(member.skills).forEach((key) => {
-            const skill = key;
-            member.skills[skill] = SCPGame.clamp(member.skills[skill] + (member.role === "researcher" && skill === "research" ? 7 : 2), 0, 100);
-        });
+        autoAssignStaff(state);
         return { ok: true, message: `${member.name} suit une formation spécialisée.` };
     }
     SCPGame.trainStaff = trainStaff;
+    function setStaffShift(state, staffId, shift) {
+        const member = state.staff.find((entry) => entry.id === staffId);
+        if (!member)
+            return { ok: false, message: "Personnel introuvable." };
+        if (member.role === "director")
+            return { ok: false, message: "Le directeur conserve une astreinte permanente." };
+        member.shift = shift;
+        member.needs.stress = SCPGame.clamp(member.needs.stress + 2, 0, 100);
+        autoAssignStaff(state);
+        return { ok: true, message: `${member.name} passe en équipe de ${shift === "day" ? "jour" : "nuit"}.` };
+    }
+    SCPGame.setStaffShift = setStaffShift;
+    function vetStaff(state, staffId) {
+        const member = state.staff.find((entry) => entry.id === staffId);
+        if (!member)
+            return { ok: false, message: "Personnel introuvable." };
+        const cost = { funds: 700, intel: 1 };
+        if (!SCPGame.payCost(state.resources, cost))
+            return { ok: false, message: "Ressources insuffisantes." };
+        const threatNeutralized = member.compromised;
+        member.loyalty = SCPGame.clamp(member.loyalty + 8, 0, 100);
+        member.compromised = false;
+        member.needs.stress = SCPGame.clamp(member.needs.stress + 4, 0, 100);
+        state.reputation.personnel = SCPGame.clamp(state.reputation.personnel - 0.4, 0, 100);
+        if (threatNeutralized) {
+            state.resources.intel += 4;
+            state.reputation.command = SCPGame.clamp(state.reputation.command + 2, 0, 100);
+            state.reputation.suspicion = SCPGame.clamp(state.reputation.suspicion - 2, 0, 100);
+            addNotification(state, "Menace interne neutralisée", `${member.name} a été isolé du réseau opérationnel puis revalidé.`, "major");
+            logHistory(state, `Contrôle de sécurité : compromission de ${member.name} neutralisée.`);
+            return { ok: true, message: `Compromission détectée et neutralisée chez ${member.name}.` };
+        }
+        logHistory(state, `Contrôle de sécurité préventif terminé pour ${member.name}.`);
+        return { ok: true, message: `${member.name} a été revalidé, aucun indicateur hostile.` };
+    }
+    SCPGame.vetStaff = vetStaff;
     function researchNode(state, nodeId) {
         const node = state.researchNodes.find((entry) => entry.id === nodeId);
         if (!node)
@@ -2776,20 +2835,64 @@ var SCPGame;
         const procedure = state.procedures.find((entry) => entry.id === scp.procedureId);
         if (!procedure)
             return { ok: false, message: "Procédure introuvable." };
-        Object.assign(procedure, updates);
+        const definition = SCPGame.getSCPDefinition(scp.definitionId);
+        const requiredStaff = Object.values(definition.requirements.staff).reduce((sum, count) => sum + (count ?? 0), 0);
+        const minimumTraining = SCPGame.clamp(18 + definition.risk * 4, 20, 78);
+        const booleanKeys = ["backupPower", "analogBackup", "biometricMonitoring", "opticalMonitoring", "automatedLockdown", "humaneCare", "restrictedTesting", "isolatedNetwork", "redundantVentilation"];
+        const lockedOption = booleanKeys.find((key) => updates[key] === true && !isProcedureOptionUnlocked(state, key));
+        if (lockedOption) {
+            const unlock = getProcedureOptionUnlock(lockedOption);
+            const research = state.researchNodes.find((node) => unlock && node.unlocks.includes(unlock));
+            return { ok: false, message: `Recherche requise : ${research?.name ?? unlock ?? "doctrine avancée"}.` };
+        }
+        const observation = Number(updates.observationLevel);
+        const assigned = Number(updates.assignedStaff);
+        const maintenance = Number(updates.maintenanceFrequency);
+        const training = Number(updates.trainingRequired);
+        if (Number.isFinite(observation))
+            procedure.observationLevel = SCPGame.clamp(Math.round(observation), 0, 100);
+        if (Number.isFinite(assigned))
+            procedure.assignedStaff = SCPGame.clamp(Math.round(assigned), requiredStaff, Math.min(18, requiredStaff + 3));
+        if (Number.isFinite(maintenance))
+            procedure.maintenanceFrequency = SCPGame.clamp(Math.round(maintenance), 20, 100);
+        if (Number.isFinite(training))
+            procedure.trainingRequired = SCPGame.clamp(Math.round(training), minimumTraining, 100);
+        booleanKeys.forEach((key) => {
+            if (typeof updates[key] === "boolean")
+                procedure[key] = Boolean(updates[key]);
+        });
+        if (typeof updates.notes === "string")
+            procedure.notes = updates.notes;
+        const enabledOptions = booleanKeys.filter((key) => Boolean(procedure[key])).length;
+        procedure.complexity = SCPGame.clamp(Math.round(24 + definition.risk * 3.2 + enabledOptions * 3 + procedure.observationLevel * 0.08 + procedure.maintenanceFrequency * 0.05), 25, 100);
         procedure.version += 1;
         procedure.notes = SCPGame.sanitizeText(procedure.notes);
         logHistory(state, `Procédure ${SCPGame.getSCPDefinition(scp.definitionId).designation} révisée en version ${procedure.version}.`);
         return { ok: true, message: `Procédure v${procedure.version} enregistrée.` };
     }
     SCPGame.updateProcedure = updateProcedure;
+    function getEffectiveRoomContainment(room) {
+        return SCPGame.getUndergroundDefinition(room.type).containment + room.upgrades.length;
+    }
+    SCPGame.getEffectiveRoomContainment = getEffectiveRoomContainment;
+    function getEffectiveRoomSecurity(room) {
+        return SCPGame.getUndergroundDefinition(room.type).security + room.upgrades.length;
+    }
+    SCPGame.getEffectiveRoomSecurity = getEffectiveRoomSecurity;
     function getCompatibleRooms(state, scp) {
         const definition = SCPGame.getSCPDefinition(scp.definitionId);
         return state.undergroundRooms.filter((room) => {
+            if (room.id === scp.roomId)
+                return false;
             if (room.scpId && room.scpId !== scp.id)
                 return false;
             const roomDefinition = SCPGame.getUndergroundDefinition(room.type);
-            return definition.requirements.roomTags.some((tag) => roomDefinition.tags.includes(tag)) || roomDefinition.containment >= definition.requirements.minContainment;
+            const isContainmentRoom = roomDefinition.tags.some((tag) => CONTAINMENT_ROOM_TAGS.includes(tag));
+            const tagMatch = definition.requirements.roomTags.some((tag) => roomDefinition.tags.includes(tag));
+            return isContainmentRoom
+                && tagMatch
+                && getEffectiveRoomContainment(room) >= definition.requirements.minContainment
+                && getEffectiveRoomSecurity(room) >= definition.requirements.minSecurity;
         });
     }
     SCPGame.getCompatibleRooms = getCompatibleRooms;
@@ -2804,11 +2907,18 @@ var SCPGame;
         const room = roomId ? candidates.find((entry) => entry.id === roomId) : candidates[0];
         if (!room)
             return { ok: false, message: `Aucune cellule compatible avec ${definition.designation}.` };
-        if (!scp.transferred) {
-            const transferCost = { funds: 1800 + definition.risk * 280, ammo: Math.max(0, Math.floor(definition.risk / 3)), medical: Math.max(0, Math.floor(definition.risk / 5)) };
-            if (!SCPGame.payCost(state.resources, transferCost))
-                return { ok: false, message: "Ressources insuffisantes pour sécuriser le transfert." };
-        }
+        if (room.id === scp.roomId)
+            return { ok: false, message: `${definition.designation} occupe déjà cette cellule.` };
+        const wasTransferred = scp.transferred;
+        const relocationFactor = wasTransferred ? 0.55 : 1;
+        const transferCost = {
+            funds: Math.round((1800 + definition.risk * 280) * relocationFactor),
+            ammo: Math.max(0, Math.ceil(definition.risk / (wasTransferred ? 5 : 3))),
+            medical: Math.max(0, Math.ceil(definition.risk / (wasTransferred ? 8 : 5)))
+        };
+        if (!SCPGame.payCost(state.resources, transferCost))
+            return { ok: false, message: `Ressources insuffisantes pour sécuriser ${wasTransferred ? "la relocalisation" : "le transfert"}.` };
+        const previousRisk = scp.breachRisk;
         if (scp.roomId) {
             const previous = state.undergroundRooms.find((entry) => entry.id === scp.roomId);
             if (previous)
@@ -2819,7 +2929,7 @@ var SCPGame;
         scp.contained = true;
         scp.transferred = true;
         scp.activeEffect = "Confinement en stabilisation";
-        scp.breachRisk = Math.max(8, definition.risk * 1.8);
+        scp.breachRisk = wasTransferred ? Math.max(previousRisk, definition.risk * 1.8) : Math.max(8, definition.risk * 1.8);
         autoAssignStaff(state);
         addNotification(state, `${definition.designation} transféré`, `${definition.name} est maintenant au niveau -${room.level + 1}.`, definition.objectClass === "Keter" ? "major" : "info");
         logHistory(state, `${definition.designation} transféré vers ${SCPGame.getUndergroundDefinition(room.type).name}.`);
@@ -2828,6 +2938,7 @@ var SCPGame;
     SCPGame.transferSCP = transferSCP;
     function saveGame(state, autosave = false) {
         try {
+            state.savedAt = Date.now();
             const serialized = JSON.stringify(state);
             localStorage.setItem(autosave ? SCPGame.AUTOSAVE_KEY : SCPGame.SAVE_KEY, serialized);
             state.lastAutosave = state.elapsedMinutes;
@@ -2844,21 +2955,7 @@ var SCPGame;
             const raw = localStorage.getItem(autosave ? SCPGame.AUTOSAVE_KEY : SCPGame.SAVE_KEY);
             if (!raw)
                 return undefined;
-            const state = JSON.parse(raw);
-            if (!state.version)
-                return undefined;
-            state.speed = 0;
-            state.previousSpeed = state.previousSpeed || 1;
-            state.buildSelection = undefined;
-            state.currentEventId = undefined;
-            state.camera = state.camera ?? {
-                region: { zoom: 1, offsetX: 0, offsetY: 0 },
-                surface: { zoom: 1, offsetX: 0, offsetY: 0 },
-                underground: { zoom: 1, offsetX: 0, offsetY: 0 },
-                command: { zoom: 1, offsetX: 0, offsetY: 0 },
-                management: { zoom: 1, offsetX: 0, offsetY: 0 }
-            };
-            return state;
+            return normalizeLoadedState(JSON.parse(raw));
         }
         catch (error) {
             console.error("Échec de chargement", error);
@@ -2866,18 +2963,35 @@ var SCPGame;
         }
     }
     SCPGame.loadGame = loadGame;
+    function loadLatestGame() {
+        const manual = loadGame(false);
+        const auto = loadGame(true);
+        if (!manual)
+            return auto;
+        if (!auto)
+            return manual;
+        return (auto.savedAt || 0) > (manual.savedAt || 0) ? auto : manual;
+    }
+    SCPGame.loadLatestGame = loadLatestGame;
+    function hasSavedGame() {
+        try {
+            return Boolean(localStorage.getItem(SCPGame.SAVE_KEY) || localStorage.getItem(SCPGame.AUTOSAVE_KEY));
+        }
+        catch (error) {
+            console.warn("Stockage local indisponible", error);
+            return false;
+        }
+    }
+    SCPGame.hasSavedGame = hasSavedGame;
     function exportSave(state) {
         SCPGame.downloadText(`scp-site-director-J${state.day}.json`, JSON.stringify(state, null, 2));
     }
     SCPGame.exportSave = exportSave;
     function importSave(raw) {
         try {
-            const state = JSON.parse(raw);
-            if (!state.version || !state.resources || !state.surfaceRooms)
-                throw new Error("Format incompatible");
-            state.speed = 0;
-            state.buildSelection = undefined;
-            return state;
+            if (raw.length > 4000000)
+                throw new Error("Sauvegarde trop volumineuse");
+            return normalizeLoadedState(JSON.parse(raw));
         }
         catch (error) {
             console.error(error);
@@ -2885,10 +2999,132 @@ var SCPGame;
         }
     }
     SCPGame.importSave = importSave;
+    function continueAfterVictory(state) {
+        state.mode = "sandbox";
+        state.victory = false;
+        state.speed = 0;
+        state.previousSpeed = 1;
+        state.currentChapter = Math.max(state.currentChapter, state.campaign.length - 1);
+        state.researchNodes.forEach((node) => node.completed = true);
+        state.scps.forEach((scp) => scp.discovered = true);
+        addNotification(state, "Mandat prolongé", "Le Site reste jouable en mode bac à sable avec tous les dossiers autorisés.", "info");
+        logHistory(state, "Mandat Deep Protocol prolongé en exploitation libre.");
+    }
+    SCPGame.continueAfterVictory = continueAfterVictory;
+    function normalizeLoadedState(candidate) {
+        if (!candidate || typeof candidate !== "object")
+            return undefined;
+        const raw = candidate;
+        if (typeof raw.version !== "string")
+            return undefined;
+        const mode = raw.mode === "sandbox" ? "sandbox" : "campaign";
+        const difficulty = ["story", "standard", "director", "keter"].includes(String(raw.settings?.difficulty)) ? raw.settings.difficulty : "standard";
+        const seed = Number.isFinite(raw.seed) ? Number(raw.seed) : Date.now();
+        const defaults = createNewGame(mode, difficulty, seed);
+        const objectValue = (value, fallback) => value && typeof value === "object" && !Array.isArray(value) ? { ...fallback, ...value } : fallback;
+        const arrayValue = (value, fallback) => Array.isArray(value) && value.every((entry) => entry && typeof entry === "object") ? value : fallback;
+        const state = {
+            ...defaults,
+            ...raw,
+            version: SCPGame.GAME_VERSION,
+            seed,
+            mode,
+            settings: objectValue(raw.settings, defaults.settings),
+            resources: objectValue(raw.resources, defaults.resources),
+            reputation: objectValue(raw.reputation, defaults.reputation),
+            regionFacilities: arrayValue(raw.regionFacilities, defaults.regionFacilities),
+            surfaceRooms: arrayValue(raw.surfaceRooms, defaults.surfaceRooms),
+            undergroundRooms: arrayValue(raw.undergroundRooms, defaults.undergroundRooms),
+            staff: arrayValue(raw.staff, defaults.staff),
+            workItems: arrayValue(raw.workItems, defaults.workItems),
+            scps: arrayValue(raw.scps, defaults.scps),
+            procedures: arrayValue(raw.procedures, defaults.procedures),
+            researchNodes: arrayValue(raw.researchNodes, defaults.researchNodes),
+            events: arrayValue(raw.events, defaults.events),
+            crisis: objectValue(raw.crisis, defaults.crisis),
+            campaign: arrayValue(raw.campaign, defaults.campaign),
+            notifications: arrayValue(raw.notifications, defaults.notifications),
+            history: Array.isArray(raw.history) ? raw.history.filter((entry) => typeof entry === "string").slice(-500) : defaults.history,
+            flags: objectValue(raw.flags, defaults.flags),
+            camera: objectValue(raw.camera, defaults.camera),
+            buildSelection: undefined
+        };
+        state.savedAt = typeof state.savedAt === "number" && Number.isFinite(state.savedAt) ? state.savedAt : Date.now() - Math.max(0, 1000000 - (state.elapsedMinutes || 0));
+        state.speed = 0;
+        state.previousSpeed = state.previousSpeed || 1;
+        state.buildSelection = undefined;
+        ["inspection-delayed", "night-overtime", "infiltration-shadowed", "infiltration-contained", "ethics-redacted"].forEach((key) => {
+            const timestamp = Number(state.flags[`${key}:at`]);
+            if (Boolean(state.flags[key]) && !Number.isFinite(timestamp))
+                state.flags[`${key}:at`] = state.elapsedMinutes;
+        });
+        state.flags["load-schema-version"] = LOAD_SCHEMA_VERSION;
+        if (state.currentEventId && !state.events?.some((event) => event.id === state.currentEventId && !event.resolved))
+            state.currentEventId = undefined;
+        state.surfaceRooms.forEach((room) => { room.staffAssigned = room.staffAssigned ?? []; room.queue = room.queue ?? []; room.upgrades = room.upgrades ?? []; });
+        state.undergroundRooms.forEach((room) => { room.staffAssigned = room.staffAssigned ?? []; room.upgrades = room.upgrades ?? []; room.enabled = room.enabled !== false; room.sealed = Boolean(room.sealed); });
+        state.staff.forEach((member, index) => {
+            member.path = member.path ?? [];
+            member.pathIndex = member.pathIndex ?? 0;
+            member.shift = member.shift ?? (index % 3 === 0 ? "night" : "day");
+            member.loyalty = SCPGame.clamp(Number(member.loyalty ?? 70), 0, 100);
+            member.compromised = Boolean(member.compromised);
+            member.taskProgress = SCPGame.clamp(Number(member.taskProgress ?? 0), 0, 100);
+        });
+        state.scps = state.scps.filter((scp) => SCPGame.SCP_DEFINITIONS.some((definition) => definition.id === scp.definitionId));
+        defaults.scps.forEach((defaultScp) => {
+            if (!state.scps.some((scp) => scp.definitionId === defaultScp.definitionId))
+                state.scps.push(defaultScp);
+        });
+        state.scps.forEach((scp) => {
+            let procedure = state.procedures.find((entry) => entry.id === scp.procedureId || entry.scpId === scp.definitionId);
+            if (!procedure) {
+                procedure = createDefaultProcedure(scp.definitionId);
+                state.procedures.push(procedure);
+            }
+            scp.procedureId = procedure.id;
+            ["backupPower", "analogBackup", "biometricMonitoring", "automatedLockdown", "humaneCare", "isolatedNetwork", "redundantVentilation"].forEach((key) => {
+                if (!isProcedureOptionUnlocked(state, key))
+                    procedure[key] = false;
+            });
+        });
+        state.researchNodes = defaults.researchNodes.map((defaultNode) => {
+            const loaded = state.researchNodes.find((node) => node.id === defaultNode.id);
+            return loaded ? { ...defaultNode, completed: Boolean(loaded.completed) } : defaultNode;
+        });
+        state.campaign = defaults.campaign.map((defaultChapter) => {
+            const loaded = state.campaign.find((chapter) => chapter.id === defaultChapter.id);
+            if (!loaded)
+                return defaultChapter;
+            return {
+                ...defaultChapter,
+                complete: Boolean(loaded.complete),
+                objectives: defaultChapter.objectives.map((defaultObjective) => {
+                    const loadedObjective = loaded.objectives?.find((objective) => objective.id === defaultObjective.id);
+                    return loadedObjective ? { ...defaultObjective, progress: Number(loadedObjective.progress) || 0, complete: Boolean(loadedObjective.complete) } : defaultObjective;
+                })
+            };
+        });
+        state.crisis.zones = arrayValue(state.crisis.zones, []);
+        state.crisis.orders = arrayValue(state.crisis.orders, []);
+        state.crisis.log = Array.isArray(state.crisis.log) ? state.crisis.log.filter((entry) => typeof entry === "string") : [];
+        autoAssignStaff(state);
+        return state;
+    }
 })(SCPGame || (SCPGame = {}));
 var SCPGame;
 (function (SCPGame) {
     const SIMULATION_MINUTES_PER_REAL_SECOND = 6;
+    const CRISIS_ORDER_ROLES = {
+        "deploy-security": "guard",
+        "deploy-mtf": "mtf",
+        "restore-power": "engineer",
+        "lockdown": "engineer",
+        "seal-ventilation": "engineer",
+        "medical-response": "medic",
+        "decontaminate": "medic",
+        "amnestic-response": "admin"
+    };
     function getSimulationMinutesPerRealSecond() {
         return SIMULATION_MINUTES_PER_REAL_SECOND;
     }
@@ -2914,6 +3150,7 @@ var SCPGame;
         }
         updateUtilityReserves(state);
         updateStaff(state);
+        updateKeterStability(state);
         if (state.elapsedMinutes % 10 === 0)
             processSurfaceQueues(state);
         if (state.elapsedMinutes % 30 === 0)
@@ -2923,6 +3160,8 @@ var SCPGame;
             produceResearchAndIntel(state);
             spawnRoutineWork(state);
             updateReputation(state);
+            updateInternalSecurity(state);
+            updateDeferredConsequences(state);
             updateCampaign(state);
             maybeSpawnRandomEvent(state);
         }
@@ -3019,7 +3258,17 @@ var SCPGame;
         member.targetRoomId = room.id;
         member.path = SCPGame.getManhattanPath({ x: Math.round(member.position.x), y: Math.round(member.position.y) }, { x: Math.round(center.x), y: Math.round(center.y) }, state.surfaceWidth, state.surfaceHeight);
         member.pathIndex = 0;
-        member.status = "moving";
+        if (!["injured", "quarantined", "eating", "resting"].includes(member.status))
+            member.status = "moving";
+    }
+    function queueStaffTreatment(state, member, room, source, severity) {
+        const alreadyQueued = room.queue.some((item) => item.kind === "patient" && item.metadata?.staffId === member.id)
+            || state.workItems.some((item) => item.kind === "patient" && item.metadata?.staffId === member.id);
+        if (alreadyQueued)
+            return;
+        const item = createWorkItem("patient", severity, state.elapsedMinutes, source);
+        item.metadata = { staffId: member.id };
+        room.queue.push(item);
     }
     function updateStaff(state) {
         const moraleBonus = state.scps.reduce((sum, scp) => {
@@ -3046,7 +3295,12 @@ var SCPGame;
                 if (member.taskProgress >= 100) {
                     member.status = "working";
                     member.taskProgress = 0;
-                    member.experience = SCPGame.clamp(member.experience + 5, 0, 100);
+                    member.experience = SCPGame.clamp(member.experience + 9, 0, 100);
+                    Object.keys(member.skills).forEach((key) => {
+                        const skill = key;
+                        const specialist = member.role === "researcher" && skill === "research" || member.role === "guard" && skill === "security" || member.role === "engineer" && skill === "engineering" || member.role === "medic" && skill === "medicine";
+                        member.skills[skill] = SCPGame.clamp(member.skills[skill] + (specialist ? 5 : 1), 0, 100);
+                    });
                     SCPGame.addNotification(state, "Formation terminée", `${member.name} a achevé sa formation.`, "info");
                 }
                 return;
@@ -3059,7 +3313,7 @@ var SCPGame;
                 member.status = "quarantined";
                 const quarantine = findSurfaceRoomByService(state, "quarantine");
                 if (quarantine) {
-                    quarantine.queue.push(createWorkItem("patient", 8, state.elapsedMinutes, "Contamination du personnel"));
+                    queueStaffTreatment(state, member, quarantine, "Contamination du personnel", 8);
                     setStaffTarget(state, member, quarantine);
                 }
                 return;
@@ -3068,13 +3322,23 @@ var SCPGame;
                 member.status = "injured";
                 const medical = findSurfaceRoomByService(state, "medical");
                 if (medical) {
-                    medical.queue.push(createWorkItem("patient", 6, state.elapsedMinutes, "Blessure du personnel"));
+                    queueStaffTreatment(state, member, medical, "Blessure du personnel", 6);
                     setStaffTarget(state, member, medical);
                 }
                 return;
             }
             let desiredRoom;
-            if (member.needs.hunger > 72) {
+            if (member.status === "quarantined") {
+                desiredRoom = findSurfaceRoomByService(state, "quarantine");
+                if (desiredRoom)
+                    queueStaffTreatment(state, member, desiredRoom, "Suivi de quarantaine", 8);
+            }
+            else if (member.status === "injured") {
+                desiredRoom = findSurfaceRoomByService(state, "medical");
+                if (desiredRoom)
+                    queueStaffTreatment(state, member, desiredRoom, "Soins du personnel", 6);
+            }
+            else if (member.needs.hunger > 72) {
                 desiredRoom = findSurfaceRoomByService(state, "food");
                 member.status = "eating";
             }
@@ -3126,7 +3390,10 @@ var SCPGame;
                 }
             }
             else if (desiredRoom && member.position.layer === "surface") {
-                if (SCPGame.getSurfaceDefinition(desiredRoom.type).services.includes("food")) {
+                if (member.status === "injured" || member.status === "quarantined") {
+                    member.needs.stress = SCPGame.clamp(member.needs.stress - 0.03, 0, 100);
+                }
+                else if (SCPGame.getSurfaceDefinition(desiredRoom.type).services.includes("food")) {
                     member.needs.hunger = SCPGame.clamp(member.needs.hunger - 0.45, 0, 100);
                     member.needs.morale = SCPGame.clamp(member.needs.morale + 0.05, 0, 100);
                     if (member.needs.hunger < 25)
@@ -3144,8 +3411,9 @@ var SCPGame;
                 }
             }
             if (member.needs.fatigue > 92 || member.needs.stress > 94) {
-                const errorChance = 0.0007 * difficulty;
-                if (Math.random() < errorChance) {
+                const overtimeMultiplier = Boolean(state.flags["night-overtime"]) ? 1.8 : 1;
+                const errorChance = 0.0007 * difficulty * overtimeMultiplier;
+                if (simulationChance(state, `staff-error-${member.id}`, errorChance)) {
                     member.needs.health = SCPGame.clamp(member.needs.health - 8, 0, 100);
                     state.reputation.personnel = SCPGame.clamp(state.reputation.personnel - 0.5, 0, 100);
                     SCPGame.logHistory(state, `Erreur opérationnelle liée à la fatigue de ${member.name}.`);
@@ -3257,7 +3525,7 @@ var SCPGame;
             case "patient":
                 state.resources.medical = Math.max(0, state.resources.medical - item.severity * 0.08);
                 state.reputation.personnel = SCPGame.clamp(state.reputation.personnel + 0.15, 0, 100);
-                healStaff(state, item.severity * 1.4);
+                healStaff(state, item.severity * 1.4, typeof item.metadata?.staffId === "string" ? item.metadata.staffId : undefined);
                 break;
             case "delivery":
                 state.resources.food += 0.5 + item.severity * 0.3;
@@ -3307,22 +3575,27 @@ var SCPGame;
         }
         SCPGame.logHistory(state, `Échec de traitement : ${item.source ?? item.kind}.`);
     }
-    function healStaff(state, amount) {
+    function healStaff(state, amount, staffId) {
         const injured = state.staff
-            .filter((member) => member.status === "injured" || member.needs.health < 100)
+            .filter((member) => (!staffId || member.id === staffId) && (member.status === "injured" || member.status === "quarantined" || member.needs.health < 100 || member.needs.contamination > 0))
             .sort((a, b) => a.needs.health - b.needs.health)[0];
         if (!injured)
             return;
         injured.needs.health = SCPGame.clamp(injured.needs.health + amount, 0, 100);
         injured.needs.contamination = SCPGame.clamp(injured.needs.contamination - amount * 0.4, 0, 100);
-        if (injured.needs.health > 72 && injured.needs.contamination < 35)
+        if (injured.needs.health > 72 && injured.needs.contamination < 35) {
             injured.status = "working";
+            injured.target = undefined;
+            injured.targetRoomId = undefined;
+            injured.path = [];
+            SCPGame.autoAssignStaff(state);
+        }
     }
     function injureRandomStaff(state, amount) {
         const candidates = state.staff.filter((member) => member.status !== "dead");
         if (candidates.length === 0)
             return;
-        const member = candidates[Math.floor(Math.random() * candidates.length)];
+        const member = candidates[simulationIndex(state, "injure-staff", candidates.length)];
         member.needs.health = SCPGame.clamp(member.needs.health - amount, 0, 100);
         if (member.needs.health <= 0) {
             member.status = "dead";
@@ -3331,8 +3604,8 @@ var SCPGame;
         }
     }
     function repairLowestConditionRoom(state, amount) {
-        const surface = state.surfaceRooms.sort((a, b) => a.condition - b.condition)[0];
-        const underground = state.undergroundRooms.sort((a, b) => a.condition - b.condition)[0];
+        const surface = [...state.surfaceRooms].sort((a, b) => a.condition - b.condition)[0];
+        const underground = [...state.undergroundRooms].sort((a, b) => a.condition - b.condition)[0];
         if (!surface && !underground)
             return;
         if (!underground || (surface && surface.condition <= underground.condition)) {
@@ -3368,16 +3641,17 @@ var SCPGame;
         const scpDefinition = SCPGame.getSCPDefinition(scp.definitionId);
         const roomDefinition = SCPGame.getUndergroundDefinition(room.type);
         let score = 20;
-        score += SCPGame.clamp((roomDefinition.containment - scpDefinition.requirements.minContainment + 2) * 7, -25, 24);
-        score += SCPGame.clamp((roomDefinition.security - scpDefinition.requirements.minSecurity + 2) * 5, -20, 18);
+        score += SCPGame.clamp((SCPGame.getEffectiveRoomContainment(room) - scpDefinition.requirements.minContainment + 2) * 7, -25, 24);
+        score += SCPGame.clamp((SCPGame.getEffectiveRoomSecurity(room) - scpDefinition.requirements.minSecurity + 2) * 5, -20, 18);
         const tagMatches = scpDefinition.requirements.roomTags.filter((tag) => roomDefinition.tags.includes(tag)).length;
         score += tagMatches * 5;
         score += (room.condition - 60) * 0.22;
         const assignedMembers = room.staffAssigned
             .map((id) => state.staff.find((member) => member.id === id))
-            .filter((member) => Boolean(member && member.status !== "dead" && member.status !== "off-duty"));
+            .filter((member) => Boolean(member && !["dead", "off-duty", "injured", "quarantined", "training"].includes(member.status)));
         const requiredStaff = Object.values(scpDefinition.requirements.staff).reduce((sum, count) => sum + (count ?? 0), 0);
-        score += requiredStaff === 0 ? 8 : SCPGame.clamp(assignedMembers.length / requiredStaff * 15, 0, 18);
+        const plannedStaff = Math.max(requiredStaff, procedure.assignedStaff);
+        score += plannedStaff === 0 ? 8 : SCPGame.clamp(assignedMembers.length / plannedStaff * 15, 0, 18);
         const avgTraining = assignedMembers.length ? assignedMembers.reduce((sum, member) => sum + member.experience, 0) / assignedMembers.length : 0;
         score += SCPGame.clamp((avgTraining - procedure.trainingRequired) * 0.15, -12, 8);
         const powerRatio = state.resources.powerCapacity > 0 ? state.resources.power / state.resources.powerCapacity : 0;
@@ -3412,7 +3686,7 @@ var SCPGame;
         score -= complexityPenalty;
         score += scp.knowledge * 0.08;
         if (scp.definitionId === "scp-173") {
-            if (procedure.assignedStaff < 3)
+            if (assignedMembers.length < 3)
                 score -= 25;
             if (procedure.observationLevel >= 80)
                 score += 8;
@@ -3462,8 +3736,17 @@ var SCPGame;
             const conditionPenalty = Math.max(0, 65 - room.condition) * 0.04;
             const randomNoise = (Math.sin((state.elapsedMinutes + definition.risk * 19) / 73) + 1) * 0.04;
             scp.breachRisk = SCPGame.clamp(scp.breachRisk + basePressure + complianceEffect + conditionPenalty + supplyShortage + randomNoise - (compliance > 75 ? 0.9 : 0), 0, 120);
+            const previousResearchProgress = scp.researchProgress;
             scp.researchProgress = SCPGame.clamp(scp.researchProgress + Math.max(0.1, compliance / 120), 0, 100);
             scp.knowledge = SCPGame.clamp(scp.knowledge + compliance / 700, 0, 100);
+            const researchFlag = `scp-research-complete:${scp.definitionId}`;
+            if (previousResearchProgress < 100 && scp.researchProgress >= 100 && !Boolean(state.flags[researchFlag])) {
+                state.flags[researchFlag] = true;
+                state.resources.research += definition.researchValue;
+                scp.knowledge = SCPGame.clamp(scp.knowledge + 12, 0, 100);
+                SCPGame.addNotification(state, `Étude ${definition.designation} consolidée`, `Le dossier accorde ${definition.researchValue} points de recherche.`, "info");
+                SCPGame.logHistory(state, `Programme d'étude ${definition.designation} achevé.`);
+            }
             scp.daysContained += 1 / 24;
             scp.mood = SCPGame.clamp(scp.mood + (procedure.humaneCare ? 0.4 : -0.25) - definition.risk * 0.015, 0, 100);
             if (scp.definitionId === "scp-999") {
@@ -3473,11 +3756,11 @@ var SCPGame;
                 });
                 scp.breachRisk = SCPGame.clamp(scp.breachRisk - 2, 0, 100);
             }
-            if (scp.definitionId === "scp-914" && compliance > 75 && Math.random() < 0.18)
+            if (scp.definitionId === "scp-914" && compliance > 75 && simulationChance(state, `scp-914-${scp.id}`, 0.18))
                 state.resources.parts += 1.5;
-            if (scp.definitionId === "scp-294" && compliance > 70 && Math.random() < 0.15)
+            if (scp.definitionId === "scp-294" && compliance > 70 && simulationChance(state, `scp-294-${scp.id}`, 0.15))
                 state.resources.medical += 0.6;
-            if (scp.definitionId === "scp-087" && !procedure.restrictedTesting && Math.random() < 0.08)
+            if (scp.definitionId === "scp-087" && !procedure.restrictedTesting && simulationChance(state, `scp-087-${scp.id}`, 0.08))
                 scp.breachRisk += 8;
             if (compliance >= 80)
                 scp.activeEffect = "Confinement nominal";
@@ -3563,11 +3846,6 @@ var SCPGame;
                 state.flags["rationing"] = false;
         }
         state.flags["surface-blackout"] = false;
-        const stableKeter = state.scps.some((scp) => scp.contained && SCPGame.getSCPDefinition(scp.definitionId).objectClass === "Keter" && scp.breachRisk < 25);
-        if (stableKeter)
-            state.flags["stable-keter-days"] = Number(state.flags["stable-keter-days"] ?? 0) + 1;
-        else
-            state.flags["stable-keter-days"] = 0;
         SCPGame.addNotification(state, `Rapport journalier J${state.day}`, `Budget : +${SCPGame.formatNumber(income)} / -${SCPGame.formatNumber(costs)}. Personnel actif : ${activeStaff.length}.`, costs > income ? "major" : "info");
         SCPGame.logHistory(state, `Clôture journalière : revenus ${SCPGame.formatNumber(income)}, coûts ${SCPGame.formatNumber(costs)}.`);
         if (state.resources.funds <= 0) {
@@ -3615,8 +3893,12 @@ var SCPGame;
         state.events.unshift(event);
         state.currentEventId = event.id;
         state.flags["last-random-event"] = state.elapsedMinutes;
-        if (template.blocking)
+        if (template.blocking) {
+            state.flags["event-player-paused"] = state.speed === 0;
+            if (state.speed > 0)
+                state.previousSpeed = state.speed;
             state.speed = 0;
+        }
         SCPGame.addNotification(state, template.title, template.body, template.severity);
     }
     SCPGame.spawnEvent = spawnEvent;
@@ -3633,7 +3915,9 @@ var SCPGame;
         event.resolved = true;
         state.currentEventId = undefined;
         SCPGame.logHistory(state, `${event.title} — décision : ${choice.label}.`);
-        if (!state.crisis.active && state.speed === 0)
+        const playerWasPaused = Boolean(state.flags["event-player-paused"]);
+        state.flags["event-player-paused"] = false;
+        if (!playerWasPaused && !state.crisis.active && state.speed === 0)
             state.speed = state.previousSpeed || 1;
         return { ok: true, message: choice.label };
     }
@@ -3683,8 +3967,10 @@ var SCPGame;
                 }
                 break;
             case "flag":
-                if (effect.key)
+                if (effect.key) {
                     state.flags[effect.key] = effect.value ?? true;
+                    state.flags[`${effect.key}:at`] = state.elapsedMinutes;
+                }
                 break;
             case "log":
                 SCPGame.logHistory(state, String(effect.value ?? "Événement enregistré."));
@@ -3777,10 +4063,13 @@ var SCPGame;
             "amnestic-response": { medical: 4, intel: 2 }
         };
         const cost = costs[type] ?? {};
+        const assigned = getAvailableCrisisStaff(state, type);
+        if (assigned <= 0)
+            return { ok: false, message: "Aucun effectif disponible pour cet ordre." };
+        if (type === "deploy-mtf" && assigned < 2 && !state.surfaceRooms.some((room) => room.type === "mtf-bay"))
+            return { ok: false, message: "Aucune capacité FTM disponible." };
         if (!SCPGame.payCost(state.resources, cost))
             return { ok: false, message: "Ressources insuffisantes." };
-        if (type === "deploy-mtf" && state.staff.filter((member) => member.role === "mtf" && member.status !== "dead").length < 2 && !state.surfaceRooms.some((room) => room.type === "mtf-bay"))
-            return { ok: false, message: "Aucune capacité FTM disponible." };
         const durations = {
             "lockdown": 18,
             "evacuate": 35,
@@ -3792,7 +4081,6 @@ var SCPGame;
             "seal-ventilation": 28,
             "amnestic-response": 45
         };
-        const assigned = type === "deploy-mtf" ? Math.max(2, state.staff.filter((member) => member.role === "mtf" && member.status !== "dead").length) : type === "deploy-security" ? Math.max(2, state.staff.filter((member) => member.role === "guard" && member.status !== "dead").length) : type === "restore-power" || type === "lockdown" || type === "seal-ventilation" ? Math.max(1, state.staff.filter((member) => member.role === "engineer" && member.status !== "dead").length) : type === "medical-response" || type === "decontaminate" ? Math.max(1, state.staff.filter((member) => member.role === "medic" && member.status !== "dead").length) : 2;
         const order = {
             id: SCPGame.uid("order"),
             type,
@@ -3853,7 +4141,7 @@ var SCPGame;
                 if (crisis.type === "biohazard" || crisis.sourceScpId && SCPGame.getSCPDefinition(state.scps.find((scp) => scp.id === crisis.sourceScpId)?.definitionId ?? "scp-173").id === "scp-008") {
                     zone.contamination = SCPGame.clamp(zone.contamination + zone.threat * 0.015 * (zone.sealed ? 0.5 : 1), 0, 100);
                 }
-                if (zone.threat > 55 && zone.population > 0 && Math.random() < 0.08 * crisis.severity / 10) {
+                if (zone.threat > 55 && zone.population > 0 && simulationChance(state, `crisis-casualty-${zone.id}`, 0.08 * crisis.severity / 10)) {
                     zone.casualties += 1;
                     zone.population = Math.max(0, zone.population - 1);
                     crisis.siteIntegrity = SCPGame.clamp(crisis.siteIntegrity - 1.8, 0, 100);
@@ -3873,10 +4161,86 @@ var SCPGame;
             resolveCrisis(state, crisis.threatProgress < 45);
     }
     function averageRoleSkill(state, role, skill) {
-        const members = state.staff.filter((member) => member.role === role && member.status !== "dead");
+        const members = state.staff.filter((member) => member.role === role && isStaffAvailableForCrisis(state, member));
         if (members.length === 0)
             return 10;
         return members.reduce((sum, member) => sum + member.skills[skill], 0) / members.length;
+    }
+    function updateKeterStability(state) {
+        const stableKeter = state.scps.some((scp) => scp.contained && SCPGame.getSCPDefinition(scp.definitionId).objectClass === "Keter" && scp.breachRisk < 25);
+        const minutes = stableKeter ? Number(state.flags["stable-keter-minutes"] ?? 0) + 1 : 0;
+        state.flags["stable-keter-minutes"] = minutes;
+        state.flags["stable-keter-days"] = Math.floor(minutes / 1440);
+    }
+    function updateInternalSecurity(state) {
+        const active = state.staff.filter((member) => member.status !== "dead" && member.role !== "director");
+        if (active.length === 0)
+            return;
+        const authentication = SCPGame.isResearchUnlockActive(state, "biometric-monitoring") || SCPGame.isResearchUnlockActive(state, "analog-backup");
+        const contained = Boolean(state.flags["infiltration-contained"]);
+        const chance = SCPGame.clamp(0.0015 + state.reputation.suspicion / 5000, 0.0015, 0.022) * (authentication ? 0.45 : 1) * (contained ? 0.35 : 1);
+        if (!active.some((member) => member.compromised) && simulationChance(state, "internal-compromise", chance)) {
+            const candidate = [...active].sort((a, b) => a.loyalty - b.loyalty || a.id.localeCompare(b.id))[0];
+            candidate.compromised = true;
+            candidate.loyalty = SCPGame.clamp(candidate.loyalty - 8, 0, 100);
+            SCPGame.addNotification(state, "Anomalie d'habilitation", "La sécurité interne signale des accès incohérents. Lancez des vérifications ciblées.", "major");
+            SCPGame.logHistory(state, "SCiPnet détecte une signature d'accès interne incohérente.");
+        }
+        if (state.elapsedMinutes % 360 === 0) {
+            const threats = active.filter((member) => member.compromised);
+            if (threats.length > 0) {
+                state.resources.intel = Math.max(0, state.resources.intel - threats.length);
+                state.reputation.suspicion = SCPGame.clamp(state.reputation.suspicion + threats.length * 0.7, 0, 100);
+                addQueueItem(state, "access", 3 + threats.length, "access", "Trafic d'identité incohérent");
+            }
+        }
+    }
+    function updateDeferredConsequences(state) {
+        const age = (key) => state.elapsedMinutes - Number(state.flags[`${key}:at`] ?? state.elapsedMinutes);
+        if (Boolean(state.flags["inspection-delayed"]) && age("inspection-delayed") >= 720) {
+            state.flags["inspection-delayed"] = false;
+            state.reputation.suspicion = SCPGame.clamp(state.reputation.suspicion + 2, 0, 100);
+            addQueueItem(state, "inspection", 8, "cover", "Inspection reprogrammée");
+            SCPGame.addNotification(state, "Inspection reprogrammée", "Le délai est écoulé : l'équipe de couverture doit maintenant absorber un audit renforcé.", "major");
+        }
+        if (Boolean(state.flags["night-overtime"]) && age("night-overtime") >= 720) {
+            state.flags["night-overtime"] = false;
+            SCPGame.addNotification(state, "Relève nocturne normalisée", "La surtension opérationnelle de nuit prend fin.", "info");
+        }
+        if (Boolean(state.flags["infiltration-shadowed"]) && age("infiltration-shadowed") >= 360) {
+            state.flags["infiltration-shadowed"] = false;
+            const threat = state.staff.find((member) => member.compromised);
+            if (threat) {
+                threat.compromised = false;
+                threat.loyalty = SCPGame.clamp(threat.loyalty + 4, 0, 100);
+            }
+            state.resources.intel += threat ? 6 : 3;
+            state.reputation.suspicion = SCPGame.clamp(state.reputation.suspicion - 1, 0, 100);
+            SCPGame.addNotification(state, "Filature conclue", threat ? "Le réseau hostile a été cartographié et son relais interne neutralisé." : "La piste ne révèle aucun relais actif, mais fournit des signatures utiles.", "info");
+        }
+        if (Boolean(state.flags["infiltration-contained"]) && age("infiltration-contained") >= 1440) {
+            state.flags["infiltration-contained"] = false;
+        }
+        if (Boolean(state.flags["ethics-redacted"]) && age("ethics-redacted") >= 1440) {
+            state.flags["ethics-redacted"] = false;
+            state.reputation.ethics = SCPGame.clamp(state.reputation.ethics - 2, 0, 100);
+            state.reputation.command = SCPGame.clamp(state.reputation.command - 1, 0, 100);
+            addQueueItem(state, "inspection", 6, "cover", "Recoupement du Comité d'éthique");
+            SCPGame.addNotification(state, "Recoupement éthique", "Des incohérences dans le rapport expurgé provoquent un contrôle complémentaire.", "major");
+        }
+    }
+    function getAvailableCrisisStaff(state, type) {
+        const role = CRISIS_ORDER_ROLES[type];
+        if (!role)
+            return state.staff.some((member) => member.role === "director" && member.status !== "dead") ? 1 : 0;
+        const activeOrders = state.crisis.orders.filter((order) => order.status !== "completed" && order.status !== "failed");
+        const alreadyCommitted = activeOrders.reduce((sum, order) => CRISIS_ORDER_ROLES[order.type] === role ? sum + order.assigned : sum, 0);
+        const available = state.staff.filter((member) => member.role === role && isStaffAvailableForCrisis(state, member)).length;
+        const roomReserve = type === "deploy-mtf" && state.surfaceRooms.some((room) => room.type === "mtf-bay" && room.enabled) ? 2 : 0;
+        return Math.max(0, available + roomReserve - alreadyCommitted);
+    }
+    function isStaffAvailableForCrisis(state, member) {
+        return member.status !== "dead" && member.status !== "quarantined" && member.status !== "injured" && member.status !== "training" && (member.status !== "off-duty" || state.crisis.active);
     }
     function completeCrisisOrder(state, order) {
         order.status = "completed";
@@ -3985,6 +4349,7 @@ var SCPGame;
             if (state.currentChapter >= state.campaign.length - 1) {
                 state.victory = true;
                 state.speed = 0;
+                SCPGame.saveGame(state, false);
             }
             else {
                 state.currentChapter += 1;
@@ -4006,9 +4371,9 @@ var SCPGame;
     }
     function evaluateObjective(state, condition) {
         switch (condition) {
-            case "region-facilities": return state.regionFacilities.length;
+            case "region-facilities": return state.regionFacilities.filter((facility) => facility.type !== "road").length;
             case "surface-core": {
-                const required = ["reception", "checkpoint", "medical", "maintenance", "elevator"];
+                const required = ["reception", "checkpoint", "medical", "maintenance", "elevator", "laboratory", "warehouse", "staff-room"];
                 return required.filter((type) => state.surfaceRooms.some((room) => room.type === type)).length;
             }
             case "staff-count": return state.staff.filter((member) => member.status !== "dead").length;
@@ -4029,6 +4394,22 @@ var SCPGame;
             case "stable-keter": return Number(state.flags["stable-keter-days"] ?? 0) >= 1 ? 1 : 0;
             default: return 0;
         }
+    }
+    function simulationChance(state, channel, probability) {
+        const roll = Math.abs(Math.sin((state.seed + state.elapsedMinutes * 13 + hashString(channel) * 7) * 12.9898)) % 1;
+        return roll < probability;
+    }
+    function simulationIndex(state, channel, length) {
+        if (length <= 1)
+            return 0;
+        const roll = Math.abs(Math.sin((state.seed + state.elapsedMinutes * 31 + hashString(channel) * 11) * 78.233)) % 1;
+        return Math.min(length - 1, Math.floor(roll * length));
+    }
+    function hashString(value) {
+        let hash = 0;
+        for (let index = 0; index < value.length; index += 1)
+            hash = (hash * 31 + value.charCodeAt(index)) | 0;
+        return hash;
     }
 })(SCPGame || (SCPGame = {}));
 var SCPGame;
@@ -4248,9 +4629,11 @@ var SCPGame;
             ctx.fillRect(base.x + 3, base.y + metrics.tileH * 0.3 - h + 8, 2, 2);
         }
         ctx.restore();
-        ctx.fillStyle = "rgba(220,229,233,.55)";
-        ctx.font = "11px system-ui";
-        ctx.fillText("AGGLOMÉRATION CIVILE", 18, height - 22);
+        if (width >= 620) {
+            ctx.fillStyle = "rgba(220,229,233,.55)";
+            ctx.font = "11px system-ui";
+            ctx.fillText("AGGLOMÉRATION CIVILE", 18, height - 22);
+        }
     }
     function drawRegionFacility(ctx, runtime, facility, width) {
         const state = runtime.state;
@@ -4277,9 +4660,11 @@ var SCPGame;
         ctx.fillStyle = "#edf3f2";
         ctx.font = "700 11px system-ui";
         ctx.fillText(definition.icon, base.x, base.y + footprintH / 2 - height3d / 2 + 4);
-        ctx.font = "10px system-ui";
-        ctx.fillStyle = "rgba(234,241,241,.82)";
-        ctx.fillText(definition.name, base.x, base.y + footprintH / 2 + 13);
+        if (width >= 620 || selected) {
+            ctx.font = "10px system-ui";
+            ctx.fillStyle = "rgba(234,241,241,.82)";
+            ctx.fillText(definition.name, base.x, base.y + footprintH / 2 + 13);
+        }
         ctx.textAlign = "left";
         if (facility.condition < 55)
             drawWarningBadge(ctx, base.x + footprintW / 2 - 5, base.y + footprintH / 2 - height3d - 4, "!");
@@ -4645,31 +5030,13 @@ var SCPGame;
     function selectAtCanvas(runtime, clientX, clientY) {
         const state = runtime.state;
         if (state.view === "region") {
-            const cell = screenToRegionCell(runtime, clientX, clientY);
-            const facility = [...state.regionFacilities].reverse().find((entry) => SCPGame.pointInRect(cell, entry.x, entry.y, entry.width, entry.height));
-            state.selectedId = facility?.id;
-            state.selectedType = facility ? "facility" : undefined;
+            selectAtGridCell(runtime, screenToRegionCell(runtime, clientX, clientY));
         }
         else if (state.view === "surface") {
-            const cell = screenToSurfaceCell(runtime, clientX, clientY);
-            const room = [...state.surfaceRooms].reverse().find((entry) => SCPGame.pointInRect(cell, entry.x, entry.y, entry.width, entry.height));
-            if (room) {
-                state.selectedId = room.id;
-                state.selectedType = "surface-room";
-            }
-            else {
-                const rect = runtime.canvas.getBoundingClientRect();
-                const metrics = surfaceMetrics(runtime, rect.width, rect.height);
-                const staff = state.staff.find((member) => member.position.layer === "surface" && Math.hypot(member.position.x - cell.x, member.position.y - cell.y) < 0.8);
-                state.selectedId = staff?.id;
-                state.selectedType = staff ? "staff" : undefined;
-            }
+            selectAtGridCell(runtime, screenToSurfaceCell(runtime, clientX, clientY));
         }
         else if (state.view === "underground") {
-            const cell = screenToUndergroundCell(runtime, clientX, clientY);
-            const room = [...state.undergroundRooms].reverse().find((entry) => entry.level === cell.y && cell.x >= entry.x && cell.x < entry.x + entry.width);
-            state.selectedId = room?.id;
-            state.selectedType = room ? "underground-room" : undefined;
+            selectAtGridCell(runtime, screenToUndergroundCell(runtime, clientX, clientY));
         }
         else if (state.view === "command") {
             const zone = screenToCommandZone(runtime, clientX, clientY);
@@ -4678,6 +5045,32 @@ var SCPGame;
         }
     }
     SCPGame.selectAtCanvas = selectAtCanvas;
+    function selectAtGridCell(runtime, cell) {
+        const state = runtime.state;
+        if (state.view === "region") {
+            const facility = [...state.regionFacilities].reverse().find((entry) => SCPGame.pointInRect(cell, entry.x, entry.y, entry.width, entry.height));
+            state.selectedId = facility?.id;
+            state.selectedType = facility ? "facility" : undefined;
+        }
+        else if (state.view === "surface") {
+            const room = [...state.surfaceRooms].reverse().find((entry) => SCPGame.pointInRect(cell, entry.x, entry.y, entry.width, entry.height));
+            if (room) {
+                state.selectedId = room.id;
+                state.selectedType = "surface-room";
+            }
+            else {
+                const staff = state.staff.find((member) => member.position.layer === "surface" && Math.hypot(member.position.x - cell.x, member.position.y - cell.y) < 0.8);
+                state.selectedId = staff?.id;
+                state.selectedType = staff ? "staff" : undefined;
+            }
+        }
+        else if (state.view === "underground") {
+            const room = [...state.undergroundRooms].reverse().find((entry) => entry.level === cell.y && cell.x >= entry.x && cell.x < entry.x + entry.width);
+            state.selectedId = room?.id;
+            state.selectedType = room ? "underground-room" : undefined;
+        }
+    }
+    SCPGame.selectAtGridCell = selectAtGridCell;
     function drawCanvasTitle(ctx, title, subtitle, width) {
         ctx.fillStyle = "rgba(9,13,16,.72)";
         ctx.fillRect(0, 0, width, 54);
@@ -4747,6 +5140,10 @@ var SCPGame;
     let activeRuntime;
     let modalMode = "none";
     let procedureScpId = "";
+    let renderedModalKey = "";
+    let modalReturnFocus;
+    let modalPausedGame = false;
+    let renderedEndScreenKey = "";
     function escapeHtml(value) {
         return value.replace(/[&<>'"]/g, (character) => ({
             "&": "&amp;",
@@ -4758,6 +5155,77 @@ var SCPGame;
     }
     function percent(value) {
         return `${Math.round(value)} %`;
+    }
+    function focusSignature(element) {
+        if (element.id)
+            return `id:${element.id}`;
+        const attributes = ["data-action", "data-view", "data-speed", "data-tab", "data-type", "data-role", "data-staff", "data-node", "data-scp", "data-room", "data-zone", "data-order", "data-setting"];
+        const selectors = attributes
+            .filter((name) => element.hasAttribute(name))
+            .map((name) => `[${name}="${String(element.getAttribute(name)).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"]`);
+        return selectors.length ? `selector:${element.tagName.toLowerCase()}${selectors.join("")}` : undefined;
+    }
+    function findFocusTarget(container, signature) {
+        if (signature.startsWith("id:")) {
+            const target = document.getElementById(signature.slice(3));
+            return target && container.contains(target) ? target : null;
+        }
+        return container.querySelector(signature.slice("selector:".length));
+    }
+    function replaceHtmlPreservingInteraction(container, html) {
+        if (container.innerHTML === html)
+            return;
+        const active = document.activeElement instanceof HTMLElement && container.contains(document.activeElement) ? document.activeElement : undefined;
+        const signature = active ? focusSignature(active) : undefined;
+        const scrollTop = container.scrollTop;
+        const scrollLeft = container.scrollLeft;
+        const nestedScroll = Array.from(container.querySelectorAll("[data-preserve-scroll]")).map((element) => ({
+            key: String(element.dataset.preserveScroll),
+            top: element.scrollTop,
+            left: element.scrollLeft
+        }));
+        container.innerHTML = html;
+        container.scrollTop = scrollTop;
+        container.scrollLeft = scrollLeft;
+        nestedScroll.forEach((entry) => {
+            const element = container.querySelector(`[data-preserve-scroll="${entry.key}"]`);
+            if (element) {
+                element.scrollTop = entry.top;
+                element.scrollLeft = entry.left;
+            }
+        });
+        if (signature)
+            findFocusTarget(container, signature)?.focus({ preventScroll: true });
+    }
+    function setPageInert(inert) {
+        const appShell = document.getElementById("app-shell");
+        const startScreen = document.getElementById("start-screen");
+        const endScreen = document.getElementById("end-screen");
+        const startVisible = Boolean(startScreen && !startScreen.classList.contains("hidden"));
+        const endVisible = Boolean(endScreen && !endScreen.classList.contains("hidden"));
+        if (appShell)
+            appShell.inert = inert || startVisible || endVisible;
+        if (startScreen)
+            startScreen.inert = inert;
+        if (endScreen)
+            endScreen.inert = inert;
+    }
+    function prepareModal(state, returnFocus) {
+        if (modalMode === "none")
+            modalReturnFocus = returnFocus;
+        const startScreen = document.getElementById("start-screen");
+        if (startScreen?.classList.contains("hidden") && state.speed > 0) {
+            state.previousSpeed = state.speed;
+            state.speed = 0;
+            modalPausedGame = true;
+        }
+    }
+    function closeModal(state) {
+        modalMode = "none";
+        if (modalPausedGame && !state.currentEventId && document.getElementById("start-screen")?.classList.contains("hidden")) {
+            state.speed = state.previousSpeed || 1;
+        }
+        modalPausedGame = false;
     }
     function initializeUI(runtime) {
         activeRuntime = runtime;
@@ -4774,16 +5242,26 @@ var SCPGame;
         const screen = document.getElementById("start-screen");
         if (screen)
             screen.classList.remove("hidden");
+        setPageInert(modalMode !== "none");
+        const continueButton = document.getElementById("continue-button");
+        if (continueButton) {
+            const available = SCPGame.hasSavedGame();
+            continueButton.disabled = !available;
+            continueButton.textContent = available ? "Continuer" : "Aucune sauvegarde";
+        }
     }
     SCPGame.showStartScreen = showStartScreen;
     function hideStartScreen() {
         const screen = document.getElementById("start-screen");
         if (screen)
             screen.classList.add("hidden");
+        setPageInert(modalMode !== "none");
     }
     SCPGame.hideStartScreen = hideStartScreen;
     function refreshUI(runtime, force = false) {
         activeRuntime = runtime;
+        if (force)
+            runtime.canvasDirty = true;
         const state = runtime.state;
         updateTopBar(state);
         updateNavigation(state);
@@ -4812,6 +5290,7 @@ var SCPGame;
         }
         document.querySelectorAll("[data-speed]").forEach((button) => {
             button.classList.toggle("active", Number(button.dataset.speed) === state.speed);
+            button.setAttribute("aria-pressed", String(Number(button.dataset.speed) === state.speed));
         });
     }
     function updateNavigation(state) {
@@ -4825,26 +5304,27 @@ var SCPGame;
         if (!container)
             return;
         if (state.mode === "sandbox") {
-            container.innerHTML = `<strong>Bac à sable</strong><span>Construisez librement, testez les procédures et déclenchez des exercices depuis le commandement.</span>`;
+            replaceHtmlPreservingInteraction(container, `<strong>Bac à sable</strong><span>Construisez librement, testez les procédures et déclenchez des exercices depuis le commandement.</span>`);
             return;
         }
         const chapter = state.campaign[state.currentChapter];
         if (!chapter)
             return;
         const current = chapter.objectives.find((objective) => !objective.complete) ?? chapter.objectives[chapter.objectives.length - 1];
-        container.innerHTML = `
+        replaceHtmlPreservingInteraction(container, `
       <strong>${escapeHtml(chapter.title)}</strong>
       <span>${escapeHtml(current.title)} — ${escapeHtml(current.description)}</span>
       <div class="objective-progress"><i style="width:${SCPGame.clamp(current.progress / current.target * 100, 0, 100)}%"></i></div>
       <small>${SCPGame.round(current.progress, 1)} / ${current.target}</small>
-    `;
+    `);
     }
     function updateRightPanel(runtime) {
         const panel = document.getElementById("right-panel");
         if (!panel)
             return;
         const state = runtime.state;
-        let html = `<div class="panel-heading"><span>${viewLabel(state.view)}</span><button class="icon-button" data-action="help" title="Aide">?</button></div>`;
+        const mobileOpen = panel.classList.contains("mobile-open");
+        let html = `<div class="panel-heading"><span>${viewLabel(state.view)}</span><div class="panel-actions"><button class="panel-toggle" data-action="toggle-panel" aria-expanded="${mobileOpen}" aria-controls="right-panel">${mobileOpen ? "Masquer" : "Détails"}</button><button class="icon-button" data-action="help" title="Aide" aria-label="Ouvrir l'aide">Aide</button></div></div>`;
         if (state.view === "region")
             html += renderRegionPanel(state);
         else if (state.view === "surface")
@@ -4855,7 +5335,7 @@ var SCPGame;
             html += renderCommandPanel(state);
         else
             html += renderManagementSummary(state);
-        panel.innerHTML = html;
+        replaceHtmlPreservingInteraction(panel, html);
     }
     function viewLabel(view) {
         const labels = {
@@ -4941,8 +5421,8 @@ var SCPGame;
         <p class="muted">${escapeHtml(definition.description)}</p>
         ${renderMetricGrid([
                 ["État", percent(selected.condition)],
-                ["Confinement", String(definition.containment + selected.upgrades.length)],
-                ["Sécurité", String(definition.security)],
+                ["Confinement", String(SCPGame.getEffectiveRoomContainment(selected))],
+                ["Sécurité", String(SCPGame.getEffectiveRoomSecurity(selected))],
                 ["Équipe", String(selected.staffAssigned.length)]
             ])}
         ${scp ? renderContainedScpCard(state, scp) : renderCompatibleTransfers(state, selected)}
@@ -4982,11 +5462,14 @@ var SCPGame;
         </section>
       `;
         }
-        const selected = state.selectedType === "zone" ? state.crisis.zones.find((entry) => entry.id === state.selectedId) : state.crisis.zones.sort((a, b) => b.threat - a.threat)[0];
+        const selected = state.selectedType === "zone" ? state.crisis.zones.find((entry) => entry.id === state.selectedId) : [...state.crisis.zones].sort((a, b) => b.threat - a.threat)[0];
         if (!selected)
             return "";
         const orders = ["lockdown", "evacuate", "deploy-security", "deploy-mtf", "restore-power", "decontaminate", "medical-response", "seal-ventilation", "amnestic-response"];
         return `
+      <div class="zone-selector" role="group" aria-label="Zones de crise">
+        ${state.crisis.zones.map((zone) => `<button data-action="select-zone" data-zone="${zone.id}" aria-pressed="${zone.id === selected.id}"><span>${escapeHtml(zone.name)}</span><b>${Math.round(zone.threat)} %</b></button>`).join("")}
+      </div>
       ${renderSelectionHeader("!", selected.name, `Menace ${Math.round(selected.threat)} %`)}
       ${renderMetricGrid([
             ["Population", String(selected.population)],
@@ -5097,6 +5580,7 @@ var SCPGame;
         ${renderSkill("Médecine", member.skills.medicine)}
       </div>
       <div class="action-row"><button data-action="train-staff" data-staff="${member.id}">Former</button>${member.role !== "director" ? `<button class="danger" data-action="dismiss-staff" data-staff="${member.id}">Renvoyer</button>` : ""}</div>
+      <div class="action-row"><button data-action="set-shift" data-staff="${member.id}" data-shift="day" ${member.shift === "day" ? "disabled" : ""}>Équipe jour</button><button data-action="set-shift" data-staff="${member.id}" data-shift="night" ${member.shift === "night" ? "disabled" : ""}>Équipe nuit</button><button data-action="vet-staff" data-staff="${member.id}">Contrôle interne</button></div>
     `;
     }
     function renderSkill(label, value) {
@@ -5138,14 +5622,21 @@ var SCPGame;
         const overlay = document.getElementById("management-overlay");
         if (!overlay)
             return;
-        if (runtime.state.view !== "management") {
+        const canvas = document.getElementById("game-canvas");
+        const managementActive = runtime.state.view === "management";
+        if (canvas) {
+            canvas.inert = managementActive;
+            canvas.tabIndex = managementActive ? -1 : 0;
+            canvas.toggleAttribute("aria-hidden", managementActive);
+        }
+        if (!managementActive) {
             overlay.classList.add("hidden");
             return;
         }
         overlay.classList.remove("hidden");
         const state = runtime.state;
         const tab = String(state.flags["management-tab"] ?? "dashboard");
-        overlay.innerHTML = `
+        replaceHtmlPreservingInteraction(overlay, `
       <div class="management-shell">
         <nav class="management-tabs">
           ${managementTabButton("dashboard", "Tableau de bord", tab)}
@@ -5156,9 +5647,9 @@ var SCPGame;
           ${managementTabButton("reports", "Rapports", tab)}
           ${managementTabButton("settings", "Sauvegarde", tab)}
         </nav>
-        <div class="management-content">${renderManagementTab(state, tab)}</div>
+        <div class="management-content" data-preserve-scroll="management-content">${renderManagementTab(state, tab)}</div>
       </div>
-    `;
+    `);
     }
     function managementTabButton(id, label, active) {
         return `<button data-action="management-tab" data-tab="${id}" class="${id === active ? "active" : ""}">${escapeHtml(label)}</button>`;
@@ -5198,12 +5689,12 @@ var SCPGame;
         <div class="table-row table-head"><span>Nom</span><span>Rôle</span><span>État</span><span>Moral</span><span>Fatigue</span><span>Actions</span></div>
         ${state.staff.map((member) => `
           <div class="table-row">
-            <span><i class="role-dot" style="background:${SCPGame.roleColor(member.role)}"></i>${escapeHtml(member.name)}<small>Niv. ${member.clearance} · ${member.traits.map(escapeHtml).join(", ")}</small></span>
-            <span>${SCPGame.ROLE_LABELS[member.role]}</span>
-            <span>${escapeHtml(member.status)}</span>
+            <span><i class="role-dot" style="background:${SCPGame.roleColor(member.role)}"></i>${escapeHtml(member.name)}<small>Niv. ${member.clearance} · loyauté ${Math.round(member.loyalty)} · ${member.traits.map(escapeHtml).join(", ")}</small></span>
+            <span>${SCPGame.ROLE_LABELS[member.role]}<small>${member.shift === "day" ? "Jour" : "Nuit"}</small></span>
+            <span>${escapeHtml(member.status)}${member.compromised ? "<small class=\"status-danger\">risque interne</small>" : ""}</span>
             <span>${Math.round(member.needs.morale)}%</span>
             <span>${Math.round(member.needs.fatigue)}%</span>
-            <span><button data-action="select-staff" data-staff="${member.id}">Voir</button><button data-action="train-staff" data-staff="${member.id}">Former</button></span>
+            <span><button data-action="select-staff" data-staff="${member.id}">Voir</button><button data-action="train-staff" data-staff="${member.id}">Former</button><button data-action="vet-staff" data-staff="${member.id}">Vérifier</button></span>
           </div>
         `).join("")}
       </div>
@@ -5266,7 +5757,7 @@ var SCPGame;
       <div class="settings-grid">
         <section><h3>Partie</h3><button class="wide-button" data-action="save">Sauvegarder</button><button class="wide-button" data-action="load">Charger</button><button class="wide-button" data-action="export">Exporter en JSON</button><button class="wide-button" data-action="import">Importer une sauvegarde</button><button class="wide-button danger" data-action="new-game">Nouvelle partie</button></section>
         <section><h3>Accessibilité</h3>${renderToggle("audio", "Audio procédural", state.settings.audio)}${renderToggle("auto-pause", "Pause automatique critique", state.settings.autoPauseCritical)}${renderToggle("reduced-motion", "Mouvements réduits", state.settings.reducedMotion)}${renderToggle("high-contrast", "Contraste renforcé", state.settings.highContrast)}${renderToggle("tutorial", "Conseils contextuels", state.settings.tutorial)}</section>
-        <section><h3>Informations</h3><p>Version ${SCPGame.GAME_VERSION}</p><p>Graine ${state.seed}</p><p>Difficulté ${state.settings.difficulty}</p><p>Mode ${state.mode}</p></section>
+        <section><h3>Informations</h3><p>Version ${SCPGame.GAME_VERSION}</p><p>Graine ${state.seed}</p><p>Difficulté ${state.settings.difficulty}</p><p>Mode ${state.mode}</p><button class="wide-button" data-action="credits">Attribution et licence</button></section>
       </div>
     `;
     }
@@ -5290,11 +5781,22 @@ var SCPGame;
         if (currentEvent)
             modalMode = "event";
         if (modalMode === "none") {
+            setPageInert(false);
             root.classList.add("hidden");
-            root.innerHTML = "";
+            if (root.innerHTML)
+                root.innerHTML = "";
+            if (renderedModalKey && modalReturnFocus?.isConnected)
+                modalReturnFocus.focus({ preventScroll: true });
+            modalReturnFocus = undefined;
+            renderedModalKey = "";
             return;
         }
+        setPageInert(true);
         root.classList.remove("hidden");
+        root.tabIndex = -1;
+        const modalKey = modalMode === "event" && currentEvent ? `event:${currentEvent.id}` : modalMode === "procedure" ? `procedure:${procedureScpId}:${state.procedures.find((procedure) => procedure.scpId === procedureScpId || state.scps.find((scp) => scp.id === procedureScpId)?.procedureId === procedure.id)?.version ?? 0}` : modalMode;
+        if (modalKey === renderedModalKey)
+            return;
         if (modalMode === "event" && currentEvent)
             root.innerHTML = renderEventModal(state, currentEvent);
         else if (modalMode === "procedure")
@@ -5305,13 +5807,20 @@ var SCPGame;
             root.innerHTML = renderNewGameModal();
         else if (modalMode === "help")
             root.innerHTML = renderHelpModal();
+        else if (modalMode === "credits")
+            root.innerHTML = renderCreditsModal();
         else {
             modalMode = "none";
             root.classList.add("hidden");
+            renderedModalKey = "";
+            return;
         }
+        renderedModalKey = modalKey;
+        root.setAttribute("aria-labelledby", root.querySelector("h2")?.id || "modal-title");
+        window.setTimeout(() => (root.querySelector("button, input, select, textarea") ?? root).focus?.(), 0);
     }
     function renderEventModal(state, event) {
-        return `<div class="modal-card event-modal ${event.severity}"><header><span>${event.severity.toUpperCase()}</span><h2>${escapeHtml(event.title)}</h2></header><p>${escapeHtml(event.body)}</p><div class="event-choices">${event.choices.map((choice) => `<button data-action="event-choice" data-event="${event.id}" data-choice="${choice.id}"><strong>${escapeHtml(choice.label)}</strong><span>${escapeHtml(choice.description)}</span>${choice.cost ? `<small>${escapeHtml(SCPGame.costToString(choice.cost))}</small>` : ""}</button>`).join("")}</div></div>`;
+        return `<div class="modal-card event-modal ${event.severity}"><header><span>${event.severity.toUpperCase()}</span><h2 id="modal-title">${escapeHtml(event.title)}</h2></header><p>${escapeHtml(event.body)}</p><div class="event-choices">${event.choices.map((choice) => `<button data-action="event-choice" data-event="${event.id}" data-choice="${choice.id}"><strong>${escapeHtml(choice.label)}</strong><span>${escapeHtml(choice.description)}</span>${choice.cost ? `<small>${escapeHtml(SCPGame.costToString(choice.cost))}</small>` : ""}</button>`).join("")}</div></div>`;
     }
     function renderProcedureModal(state, scpId) {
         const scp = state.scps.find((entry) => entry.id === scpId || entry.definitionId === scpId);
@@ -5321,28 +5830,31 @@ var SCPGame;
         const procedure = state.procedures.find((entry) => entry.id === scp.procedureId);
         if (!procedure)
             return `<div class="modal-card"><p>Procédure introuvable.</p><button data-action="close-modal">Fermer</button></div>`;
+        const requiredStaff = Object.values(definition.requirements.staff).reduce((sum, count) => sum + (count ?? 0), 0);
+        const minimumTraining = SCPGame.clamp(18 + definition.risk * 4, 20, 78);
+        const assignedActual = state.undergroundRooms.find((room) => room.id === scp.roomId)?.staffAssigned.length ?? 0;
         return `
       <div class="modal-card procedure-modal">
-        <header><div><span>PROCÉDURE v${procedure.version}</span><h2>${definition.designation} — ${escapeHtml(definition.name)}</h2></div><button data-action="close-modal">×</button></header>
+        <header><div><span>PROCÉDURE v${procedure.version}</span><h2 id="modal-title">${definition.designation} — ${escapeHtml(definition.name)}</h2></div><button data-action="close-modal" aria-label="Fermer">×</button></header>
         <p>${escapeHtml(definition.uniqueRule)}</p>
         <div class="procedure-layout">
           <section>
             ${renderRange("observationLevel", "Niveau d'observation", procedure.observationLevel)}
-            ${renderRange("assignedStaff", "Effectif prévu", procedure.assignedStaff, 0, 12)}
-            ${renderRange("maintenanceFrequency", "Fréquence de maintenance", procedure.maintenanceFrequency)}
-            ${renderRange("trainingRequired", "Formation exigée", procedure.trainingRequired)}
-            ${renderRange("complexity", "Complexité documentaire", procedure.complexity)}
+            ${renderRange("assignedStaff", "Effectif prévu", procedure.assignedStaff, requiredStaff, Math.min(18, requiredStaff + 3))}
+            ${renderRange("maintenanceFrequency", "Fréquence de maintenance", procedure.maintenanceFrequency, 20, 100)}
+            ${renderRange("trainingRequired", "Formation exigée", procedure.trainingRequired, minimumTraining, 100)}
+            ${renderMetricGrid([["Effectif réel", `${assignedActual} / ${procedure.assignedStaff}`], ["Complexité calculée", percent(procedure.complexity)]])}
           </section>
           <section class="procedure-checks">
-            ${procedureCheck("backupPower", "Alimentation de secours", procedure.backupPower)}
-            ${procedureCheck("analogBackup", "Sauvegarde analogique", procedure.analogBackup)}
-            ${procedureCheck("biometricMonitoring", "Suivi biométrique", procedure.biometricMonitoring)}
-            ${procedureCheck("opticalMonitoring", "Surveillance optique", procedure.opticalMonitoring)}
-            ${procedureCheck("automatedLockdown", "Verrouillage automatique", procedure.automatedLockdown)}
-            ${procedureCheck("humaneCare", "Conditions coopératives", procedure.humaneCare)}
-            ${procedureCheck("restrictedTesting", "Tests strictement autorisés", procedure.restrictedTesting)}
-            ${procedureCheck("isolatedNetwork", "Réseau isolé", procedure.isolatedNetwork)}
-            ${procedureCheck("redundantVentilation", "Ventilation redondante", procedure.redundantVentilation)}
+            ${procedureCheck(state, "backupPower", "Alimentation de secours", procedure.backupPower)}
+            ${procedureCheck(state, "analogBackup", "Sauvegarde analogique", procedure.analogBackup)}
+            ${procedureCheck(state, "biometricMonitoring", "Suivi biométrique", procedure.biometricMonitoring)}
+            ${procedureCheck(state, "opticalMonitoring", "Surveillance optique", procedure.opticalMonitoring)}
+            ${procedureCheck(state, "automatedLockdown", "Verrouillage automatique", procedure.automatedLockdown)}
+            ${procedureCheck(state, "humaneCare", "Conditions coopératives", procedure.humaneCare)}
+            ${procedureCheck(state, "restrictedTesting", "Tests strictement autorisés", procedure.restrictedTesting)}
+            ${procedureCheck(state, "isolatedNetwork", "Réseau isolé", procedure.isolatedNetwork)}
+            ${procedureCheck(state, "redundantVentilation", "Ventilation redondante", procedure.redundantVentilation)}
           </section>
         </div>
         <label class="notes-field">Notes et addenda<textarea id="procedure-notes">${escapeHtml(procedure.notes)}</textarea></label>
@@ -5353,17 +5865,24 @@ var SCPGame;
     function renderRange(key, label, value, min = 0, max = 100) {
         return `<label class="range-row"><span>${escapeHtml(label)} <b data-range-value="${String(key)}">${Math.round(value)}</b></span><input type="range" min="${min}" max="${max}" value="${value}" data-procedure-range="${String(key)}"></label>`;
     }
-    function procedureCheck(key, label, checked) {
-        return `<label><input type="checkbox" data-procedure-check="${String(key)}" ${checked ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`;
+    function procedureCheck(state, key, label, checked) {
+        const unlocked = SCPGame.isProcedureOptionUnlocked(state, key);
+        const unlock = SCPGame.getProcedureOptionUnlock(key);
+        const research = state.researchNodes.find((node) => unlock && node.unlocks.includes(unlock));
+        const lockedLabel = unlocked ? "" : ` — recherche : ${research?.name ?? unlock}`;
+        return `<label title="${escapeHtml(lockedLabel)}"><input type="checkbox" data-procedure-check="${String(key)}" ${checked ? "checked" : ""} ${unlocked ? "" : "disabled"}><span>${escapeHtml(label)}${unlocked ? "" : `<small>${escapeHtml(lockedLabel)}</small>`}</span></label>`;
     }
     function renderImportModal() {
-        return `<div class="modal-card"><header><h2>Importer une sauvegarde</h2><button data-action="close-modal">×</button></header><p>Sélectionnez un fichier JSON exporté par le jeu.</p><button class="wide-button" data-action="choose-import">Choisir le fichier</button></div>`;
+        return `<div class="modal-card"><header><h2 id="modal-title">Importer une sauvegarde</h2><button data-action="close-modal" aria-label="Fermer">×</button></header><p>Sélectionnez un fichier JSON exporté par le jeu.</p><button class="wide-button" data-action="choose-import">Choisir le fichier</button></div>`;
     }
     function renderNewGameModal() {
-        return `<div class="modal-card new-game-modal"><header><h2>Nouvelle direction de Site</h2><button data-action="close-modal">×</button></header><label>Mode<select id="new-mode"><option value="campaign">Campagne Deep Protocol</option><option value="sandbox">Bac à sable complet</option></select></label><label>Difficulté<select id="new-difficulty"><option value="story">Narratif</option><option value="standard" selected>Standard</option><option value="director">Directeur</option><option value="keter">Keter</option></select></label><p>La partie actuelle reste disponible seulement si vous la sauvegardez avant de recommencer.</p><button class="wide-button danger" data-action="confirm-new-game">Créer le Site</button></div>`;
+        return `<div class="modal-card new-game-modal"><header><h2 id="modal-title">Nouvelle direction de Site</h2><button data-action="close-modal" aria-label="Fermer">×</button></header><label>Mode<select id="new-mode"><option value="campaign">Campagne Deep Protocol</option><option value="sandbox">Bac à sable complet</option></select></label><label>Difficulté<select id="new-difficulty"><option value="story">Narratif</option><option value="standard" selected>Standard</option><option value="director">Directeur</option><option value="keter">Keter</option></select></label><p>La partie actuelle reste disponible seulement si vous la sauvegardez avant de recommencer.</p><button class="wide-button danger" data-action="confirm-new-game">Créer le Site</button></div>`;
     }
     function renderHelpModal() {
-        return `<div class="modal-card help-modal"><header><h2>Manuel opérationnel</h2><button data-action="close-modal">×</button></header><div class="help-grid"><section><h3>1. Région</h3><p>Construisez une couverture cohérente, sécurisez les accès et produisez énergie, eau et fournitures.</p></section><section><h3>2. Surface</h3><p>Placez les salles, maîtrisez les files et évitez que le personnel épuisé compromette les opérations.</p></section><section><h3>3. Sous-sol</h3><p>Construisez une cellule adaptée, transférez le SCP puis révisez sa procédure selon les risques réels.</p></section><section><h3>4. Crise</h3><p>Sélectionnez une zone et combinez verrouillage, évacuation, sécurité, FTM, énergie et décontamination.</p></section></div><p><kbd>1</kbd> Région · <kbd>2</kbd> Surface · <kbd>3</kbd> Sous-sol · <kbd>4</kbd> Commandement · <kbd>5</kbd> Gestion · <kbd>Espace</kbd> Pause · <kbd>Échap</kbd> Annuler</p></div>`;
+        return `<div class="modal-card help-modal"><header><h2 id="modal-title">Manuel opérationnel</h2><button data-action="close-modal" aria-label="Fermer">×</button></header><div class="help-grid"><section><h3>1. Région</h3><p>Construisez une couverture cohérente, sécurisez les accès et produisez énergie, eau et fournitures.</p></section><section><h3>2. Surface</h3><p>Placez les salles, maîtrisez les files et évitez que le personnel épuisé compromette les opérations.</p></section><section><h3>3. Sous-sol</h3><p>Construisez une cellule adaptée, transférez le SCP puis révisez sa procédure selon les risques réels.</p></section><section><h3>4. Crise</h3><p>Sélectionnez une zone et combinez verrouillage, évacuation, sécurité, FTM, énergie et décontamination.</p></section></div><p><kbd>1</kbd> Région · <kbd>2</kbd> Surface · <kbd>3</kbd> Sous-sol · <kbd>4</kbd> Commandement · <kbd>5</kbd> Gestion · <kbd>Espace</kbd> Pause · <kbd>Échap</kbd> Annuler</p><button class="wide-button" data-action="credits">Attribution et licence</button></div>`;
+    }
+    function renderCreditsModal() {
+        return `<div class="modal-card help-modal"><header><h2 id="modal-title">Attribution et licence</h2><button data-action="close-modal" aria-label="Fermer">×</button></header><p>SCP Foundation: Site Director est une adaptation non officielle de l'univers SCP Foundation. Le jeu, son code, ses textes dérivés et ses assets originaux sont distribués sous Creative Commons Attribution-ShareAlike 3.0.</p><div class="help-grid"><section><h3>Sources SCP</h3><p>Contenus de référence issus du SCP Wiki pour SCP-008, SCP-049, SCP-087, SCP-096, SCP-106, SCP-131, SCP-173, SCP-294, SCP-682, SCP-914, SCP-939 et SCP-999. Les auteurs et liens détaillés restent disponibles hors ligne.</p></section><section><h3>Assets</h3><p>Aucun visuel officiel du wiki SCP n'est copié. L'interface, les symboles, les rendus Canvas et l'audio sont originaux ou générés procéduralement pour ce jeu.</p></section></div><p><a href="./ATTRIBUTION.md" target="_blank" rel="noopener noreferrer">Attributions détaillées</a> · <a href="./LICENSE.md" target="_blank" rel="noopener noreferrer">Avis de licence</a> · <a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener noreferrer">Texte CC BY-SA 3.0</a> · <a href="https://github.com/darknigthmare/scp-foundation-site-director" target="_blank" rel="noopener noreferrer">Code source</a></p></div>`;
     }
     function updateEndScreen(state) {
         const root = document.getElementById("end-screen");
@@ -5371,11 +5890,19 @@ var SCPGame;
             return;
         if (!state.gameOver && !state.victory) {
             root.classList.add("hidden");
-            root.innerHTML = "";
+            if (root.innerHTML)
+                root.innerHTML = "";
+            renderedEndScreenKey = "";
+            setPageInert(modalMode !== "none");
             return;
         }
+        const key = state.victory ? "victory" : "game-over";
+        if (renderedEndScreenKey === key)
+            return;
         root.classList.remove("hidden");
-        root.innerHTML = `<div><span>${state.victory ? "MANDAT ACCOMPLI" : "DIRECTION RÉVOQUÉE"}</span><h1>${state.victory ? "SITE DEEP PROTOCOL" : "RUPTURE DU VOILE"}</h1><p>${state.victory ? "Votre installation est devenue un modèle régional capable de contenir les menaces terminales." : "Le Site ne peut plus poursuivre son activité sous cette couverture."}</p><button data-action="new-game">Nouvelle partie</button><button data-action="load">Charger</button></div>`;
+        root.innerHTML = `<div><span>${state.victory ? "MANDAT ACCOMPLI" : "DIRECTION RÉVOQUÉE"}</span><h1>${state.victory ? "SITE DEEP PROTOCOL" : "RUPTURE DU VOILE"}</h1><p>${state.victory ? "Votre installation est devenue un modèle régional capable de contenir les menaces terminales." : "Le Site ne peut plus poursuivre son activité sous cette couverture."}</p>${state.victory ? `<button data-action="continue-after-victory">Continuer le Site</button>` : ""}<button data-action="new-game">Nouvelle partie</button><button data-action="load">Charger</button></div>`;
+        renderedEndScreenKey = key;
+        setPageInert(modalMode !== "none");
     }
     function handleDelegatedClick(event) {
         const target = event.target.closest("[data-action], button[data-view], [data-speed]");
@@ -5397,6 +5924,8 @@ var SCPGame;
         const action = target.dataset.action;
         if (!action)
             return;
+        if (["help", "open-procedure", "import", "new-game", "credits"].includes(action))
+            prepareModal(state, target);
         let result;
         switch (action) {
             case "pause":
@@ -5406,10 +5935,16 @@ var SCPGame;
                 modalMode = "help";
                 break;
             case "close-modal":
-                modalMode = "none";
-                if (!state.currentEventId)
-                    state.speed = state.previousSpeed || 1;
+                closeModal(state);
                 break;
+            case "toggle-panel": {
+                const panel = document.getElementById("right-panel");
+                const open = !panel?.classList.contains("mobile-open");
+                panel?.classList.toggle("mobile-open", open);
+                target.setAttribute("aria-expanded", String(open));
+                target.textContent = open ? "Masquer" : "Détails";
+                break;
+            }
             case "build":
                 SCPGame.startBuild(state, target.dataset.layer, target.dataset.type);
                 break;
@@ -5437,6 +5972,12 @@ var SCPGame;
             case "train-staff":
                 result = SCPGame.trainStaff(state, String(target.dataset.staff));
                 break;
+            case "set-shift":
+                result = SCPGame.setStaffShift(state, String(target.dataset.staff), target.dataset.shift === "night" ? "night" : "day");
+                break;
+            case "vet-staff":
+                result = SCPGame.vetStaff(state, String(target.dataset.staff));
+                break;
             case "dismiss-staff":
                 result = SCPGame.dismissStaff(state, String(target.dataset.staff));
                 break;
@@ -5452,22 +5993,26 @@ var SCPGame;
             case "open-procedure":
                 procedureScpId = String(target.dataset.scp);
                 modalMode = "procedure";
-                state.speed = 0;
                 break;
             case "save-procedure":
                 result = saveProcedureFromModal(state, String(target.dataset.scp));
                 if (result.ok)
-                    modalMode = "none";
+                    closeModal(state);
                 break;
             case "event-choice":
                 result = SCPGame.resolveEventChoice(state, String(target.dataset.event), String(target.dataset.choice));
                 modalMode = "none";
+                modalPausedGame = false;
                 break;
             case "management-tab":
                 state.flags["management-tab"] = String(target.dataset.tab);
                 break;
             case "crisis-order":
                 result = SCPGame.issueCrisisOrder(state, target.dataset.order, String(target.dataset.zone));
+                break;
+            case "select-zone":
+                state.selectedId = String(target.dataset.zone);
+                state.selectedType = "zone";
                 break;
             case "resume-crisis":
                 SCPGame.togglePause(state);
@@ -5482,7 +6027,7 @@ var SCPGame;
                 result = { ok: SCPGame.saveGame(state), message: "Sauvegarde locale enregistrée." };
                 break;
             case "load": {
-                const loaded = SCPGame.loadGame(false) ?? SCPGame.loadGame(true);
+                const loaded = SCPGame.loadLatestGame();
                 if (loaded) {
                     runtime.state = loaded;
                     activeRuntime.state = loaded;
@@ -5508,6 +6053,12 @@ var SCPGame;
                 break;
             case "confirm-new-game":
                 createGameFromModal(runtime);
+                break;
+            case "continue-after-victory":
+                SCPGame.continueAfterVictory(state);
+                break;
+            case "credits":
+                modalMode = "credits";
                 break;
             case "open-notifications":
                 openNotifications(state);
@@ -5539,6 +6090,7 @@ var SCPGame;
         if (key === "tutorial")
             state.settings.tutorial = input.checked;
         activeRuntime.uiDirty = true;
+        activeRuntime.canvasDirty = true;
     }
     function handleDelegatedInput(event) {
         const input = event.target;
@@ -5552,26 +6104,65 @@ var SCPGame;
     function handleKeyboard(event) {
         if (!activeRuntime)
             return;
-        if (event.target.matches("input, textarea, select"))
-            return;
         const state = activeRuntime.state;
+        if (modalMode !== "none") {
+            if (event.key === "Tab")
+                trapModalFocus(event);
+            else if (event.key === "Escape" && modalMode !== "event") {
+                event.preventDefault();
+                closeModal(state);
+                activeRuntime.uiDirty = true;
+                refreshUI(activeRuntime, true);
+            }
+            return;
+        }
+        if (!document.getElementById("start-screen")?.classList.contains("hidden"))
+            return;
+        const target = event.target;
+        if (target.closest("button, a, input, textarea, select, [contenteditable='true']"))
+            return;
         const views = { "1": "region", "2": "surface", "3": "underground", "4": "command", "5": "management" };
+        let handled = true;
         if (views[event.key])
             SCPGame.setView(state, views[event.key]);
         else if (event.code === "Space") {
             event.preventDefault();
             SCPGame.togglePause(state);
         }
-        else if (event.key === "Escape") {
+        else if (event.key === "Escape")
             SCPGame.cancelBuild(state);
-            modalMode = "none";
-        }
         else if (event.key === "+" || event.key === "=")
             SCPGame.setSpeed(state, Math.min(4, state.speed === 0 ? 1 : state.speed * 2));
         else if (event.key === "-")
             SCPGame.setSpeed(state, Math.max(0, state.speed / 2));
+        else
+            handled = false;
+        if (!handled)
+            return;
         activeRuntime.uiDirty = true;
         refreshUI(activeRuntime, true);
+    }
+    function trapModalFocus(event) {
+        const root = document.getElementById("modal-root");
+        if (!root)
+            return;
+        const focusable = Array.from(root.querySelectorAll("button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"))
+            .filter((element) => !element.classList.contains("hidden"));
+        if (focusable.length === 0) {
+            event.preventDefault();
+            root.focus();
+            return;
+        }
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        }
+        else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
     }
     function handleImportFile(event) {
         const input = event.target;
@@ -5584,6 +6175,7 @@ var SCPGame;
             if (imported && activeRuntime) {
                 activeRuntime.state = imported;
                 modalMode = "none";
+                modalPausedGame = false;
                 showToast("Sauvegarde importée.", "success");
                 refreshUI(activeRuntime, true);
             }
@@ -5627,8 +6219,8 @@ var SCPGame;
         const difficulty = document.getElementById("new-difficulty")?.value;
         runtime.state = SCPGame.createNewGame(mode || "campaign", difficulty || "standard");
         modalMode = "none";
+        modalPausedGame = false;
         hideStartScreen();
-        SCPGame.saveGame(runtime.state, true);
         showToast("Nouveau Site créé.", "success");
     }
     function openNotifications(state) {
@@ -5642,7 +6234,8 @@ var SCPGame;
             return;
         toast.textContent = message;
         toast.className = `toast ${type} visible`;
-        window.setTimeout(() => toast.classList.remove("visible"), 2600);
+        toast.setAttribute("role", type === "error" ? "alert" : "status");
+        window.setTimeout(() => toast.classList.remove("visible"), type === "error" ? 6000 : 3200);
     }
     SCPGame.showToast = showToast;
     function setText(id, value) {
@@ -5710,7 +6303,7 @@ var SCPGame;
         const context = canvas.getContext("2d");
         if (!context)
             throw new Error("Contexte 2D indisponible.");
-        const loaded = SCPGame.loadGame(true) ?? SCPGame.loadGame(false);
+        const loaded = SCPGame.loadLatestGame();
         const state = loaded ?? SCPGame.createNewGame("campaign", "standard");
         state.speed = 0;
         const runtime = {
@@ -5721,6 +6314,7 @@ var SCPGame;
             accumulator: 0,
             pointerDown: false,
             uiDirty: true,
+            canvasDirty: true,
             animationFrame: 0
         };
         const audio = new ProceduralAudio();
@@ -5729,7 +6323,7 @@ var SCPGame;
         bindGlobalAudio(audio, runtime);
         SCPGame.showStartScreen();
         SCPGame.renderCanvas(runtime);
-        let lastUiRefresh = 0;
+        runtime.canvasDirty = false;
         const frame = (time) => {
             const deltaSeconds = Math.min(0.12, Math.max(0, (time - runtime.lastFrame) / 1000));
             runtime.lastFrame = time;
@@ -5740,20 +6334,29 @@ var SCPGame;
                     runtime.accumulator -= minutes;
                     SCPGame.advanceSimulation(runtime.state, minutes);
                     runtime.uiDirty = true;
+                    runtime.canvasDirty = true;
                 }
             }
             audio.update(runtime.state);
-            SCPGame.renderCanvas(runtime);
-            if (runtime.uiDirty || time - lastUiRefresh > 650) {
-                SCPGame.refreshUI(runtime);
-                lastUiRefresh = time;
+            if (!document.hidden && runtime.canvasDirty) {
+                SCPGame.renderCanvas(runtime);
+                runtime.canvasDirty = false;
             }
+            if (runtime.uiDirty)
+                SCPGame.refreshUI(runtime);
             runtime.animationFrame = requestAnimationFrame(frame);
         };
         runtime.animationFrame = requestAnimationFrame(frame);
         window.addEventListener("resize", () => {
-            SCPGame.renderCanvas(runtime);
+            runtime.canvasDirty = true;
             runtime.uiDirty = true;
+        });
+        document.addEventListener("visibilitychange", () => {
+            runtime.lastFrame = performance.now();
+            if (!document.hidden) {
+                runtime.canvasDirty = true;
+                runtime.uiDirty = true;
+            }
         });
         window.addEventListener("beforeunload", () => SCPGame.saveGame(runtime.state, true));
         if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
@@ -5773,6 +6376,7 @@ var SCPGame;
         let lastPointer;
         canvas.addEventListener("pointermove", (event) => {
             runtime.hoveredCell = hoverCellForView(runtime, event.clientX, event.clientY);
+            runtime.canvasDirty = true;
             if (runtime.pointerDown && lastPointer) {
                 const dx = event.clientX - lastPointer.x;
                 const dy = event.clientY - lastPointer.y;
@@ -5782,6 +6386,7 @@ var SCPGame;
                 if (["region", "surface", "underground"].includes(runtime.state.view)) {
                     camera.offsetX += dx;
                     camera.offsetY += dy;
+                    runtime.canvasDirty = true;
                 }
             }
             lastPointer = { x: event.clientX, y: event.clientY };
@@ -5803,11 +6408,14 @@ var SCPGame;
             lastPointer = undefined;
             runtime.dragStart = undefined;
             runtime.uiDirty = true;
+            runtime.canvasDirty = true;
             SCPGame.refreshUI(runtime, true);
         });
         canvas.addEventListener("pointerleave", () => {
-            if (!runtime.pointerDown)
+            if (!runtime.pointerDown) {
                 runtime.hoveredCell = undefined;
+                runtime.canvasDirty = true;
+            }
         });
         canvas.addEventListener("wheel", (event) => {
             if (!["region", "surface", "underground"].includes(runtime.state.view))
@@ -5822,7 +6430,61 @@ var SCPGame;
             const ratio = camera.zoom / oldZoom;
             camera.offsetX -= pointerX * (ratio - 1) * 0.35;
             camera.offsetY -= pointerY * (ratio - 1) * 0.35;
+            runtime.canvasDirty = true;
         }, { passive: false });
+        canvas.addEventListener("keydown", (event) => {
+            if (["+", "=", "-", "PageUp", "PageDown"].includes(event.key)) {
+                if (!["region", "surface", "underground"].includes(runtime.state.view))
+                    return;
+                event.preventDefault();
+                event.stopPropagation();
+                const camera = runtime.state.camera[runtime.state.view];
+                const zoomIn = ["+", "=", "PageUp"].includes(event.key);
+                camera.zoom = SCPGame.clamp(camera.zoom * (zoomIn ? 1.1 : 0.9), 0.62, 1.5);
+                runtime.canvasDirty = true;
+                announceCanvas(`Zoom ${Math.round(camera.zoom * 100)} %.`);
+                return;
+            }
+            const bounds = gridBounds(runtime.state);
+            if (!bounds)
+                return;
+            const current = runtime.hoveredCell ?? { x: Math.floor(bounds.width / 2), y: Math.floor(bounds.height / 2) };
+            let next = { ...current };
+            if (event.key === "ArrowLeft")
+                next.x -= 1;
+            else if (event.key === "ArrowRight")
+                next.x += 1;
+            else if (event.key === "ArrowUp")
+                next.y -= 1;
+            else if (event.key === "ArrowDown")
+                next.y += 1;
+            else if (event.key === "Home")
+                next = { x: Math.floor(bounds.width / 2), y: Math.floor(bounds.height / 2) };
+            else if (event.key === "Enter") {
+                event.preventDefault();
+                event.stopPropagation();
+                audio.click(runtime.state.settings.audio);
+                handleGridCellActivation(runtime, current);
+                announceCanvas(`Case ${current.x + 1}, ${current.y + 1} activée.`);
+                runtime.uiDirty = true;
+                runtime.canvasDirty = true;
+                SCPGame.refreshUI(runtime, true);
+                return;
+            }
+            else
+                return;
+            event.preventDefault();
+            event.stopPropagation();
+            next.x = SCPGame.clamp(next.x, 0, bounds.width - 1);
+            next.y = SCPGame.clamp(next.y, 0, bounds.height - 1);
+            runtime.hoveredCell = next;
+            runtime.canvasDirty = true;
+            announceCanvas(`Curseur colonne ${next.x + 1}, ligne ${next.y + 1}.`);
+        });
+        canvas.addEventListener("blur", () => {
+            runtime.hoveredCell = undefined;
+            runtime.canvasDirty = true;
+        });
     }
     function hoverCellForView(runtime, clientX, clientY) {
         if (runtime.state.view === "region")
@@ -5834,30 +6496,48 @@ var SCPGame;
         return undefined;
     }
     function handleCanvasActivation(runtime, clientX, clientY) {
+        const cell = hoverCellForView(runtime, clientX, clientY);
+        if (cell) {
+            handleGridCellActivation(runtime, cell);
+            return;
+        }
+        SCPGame.selectAtCanvas(runtime, clientX, clientY);
+    }
+    function handleGridCellActivation(runtime, cell) {
         const state = runtime.state;
         const build = state.buildSelection;
         let result;
         if (build && build.layer === "region" && state.view === "region") {
-            const cell = SCPGame.screenToRegionCell(runtime, clientX, clientY);
             result = SCPGame.buildRegionFacility(state, build.type, cell.x, cell.y);
         }
         else if (build && build.layer === "surface" && state.view === "surface") {
-            const cell = SCPGame.screenToSurfaceCell(runtime, clientX, clientY);
             result = SCPGame.buildSurfaceRoom(state, build.type, cell.x, cell.y);
         }
         else if (build && build.layer === "underground" && state.view === "underground") {
-            const cell = SCPGame.screenToUndergroundCell(runtime, clientX, clientY);
             result = SCPGame.buildUndergroundRoom(state, build.type, cell.x, cell.y);
         }
         else {
-            SCPGame.selectAtCanvas(runtime, clientX, clientY);
+            SCPGame.selectAtGridCell(runtime, cell);
         }
         if (result)
             SCPGame.showToast(result.message, result.ok ? "success" : "error");
+    }
+    function gridBounds(state) {
+        if (state.view === "region")
+            return { width: state.regionWidth, height: state.regionHeight };
+        if (state.view === "surface")
+            return { width: state.surfaceWidth, height: state.surfaceHeight };
+        if (state.view === "underground")
+            return { width: state.undergroundWidth, height: state.undergroundLevels };
+        return undefined;
+    }
+    function announceCanvas(message) {
+        const status = document.getElementById("canvas-status");
+        if (status)
+            status.textContent = message;
     }
     if (document.readyState === "loading")
         document.addEventListener("DOMContentLoaded", boot);
     else
         boot();
 })(SCPGame || (SCPGame = {}));
-//# sourceMappingURL=game.js.map

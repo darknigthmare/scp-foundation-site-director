@@ -1,5 +1,15 @@
 namespace SCPGame {
   const SIMULATION_MINUTES_PER_REAL_SECOND = 6;
+  const CRISIS_ORDER_ROLES: Partial<Record<CrisisOrderType, StaffRole>> = {
+    "deploy-security": "guard",
+    "deploy-mtf": "mtf",
+    "restore-power": "engineer",
+    "lockdown": "engineer",
+    "seal-ventilation": "engineer",
+    "medical-response": "medic",
+    "decontaminate": "medic",
+    "amnestic-response": "admin"
+  };
 
   export function getSimulationMinutesPerRealSecond(): number {
     return SIMULATION_MINUTES_PER_REAL_SECOND;
@@ -25,6 +35,7 @@ namespace SCPGame {
 
     updateUtilityReserves(state);
     updateStaff(state);
+    updateKeterStability(state);
 
     if (state.elapsedMinutes % 10 === 0) processSurfaceQueues(state);
     if (state.elapsedMinutes % 30 === 0) updateRoomCondition(state);
@@ -33,6 +44,8 @@ namespace SCPGame {
       produceResearchAndIntel(state);
       spawnRoutineWork(state);
       updateReputation(state);
+      updateInternalSecurity(state);
+      updateDeferredConsequences(state);
       updateCampaign(state);
       maybeSpawnRandomEvent(state);
     }
@@ -136,7 +149,16 @@ namespace SCPGame {
       state.surfaceHeight
     );
     member.pathIndex = 0;
-    member.status = "moving";
+    if (!["injured", "quarantined", "eating", "resting"].includes(member.status)) member.status = "moving";
+  }
+
+  function queueStaffTreatment(state: GameState, member: StaffMember, room: SurfaceRoom, source: string, severity: number): void {
+    const alreadyQueued = room.queue.some((item) => item.kind === "patient" && item.metadata?.staffId === member.id)
+      || state.workItems.some((item) => item.kind === "patient" && item.metadata?.staffId === member.id);
+    if (alreadyQueued) return;
+    const item = createWorkItem("patient", severity, state.elapsedMinutes, source);
+    item.metadata = { staffId: member.id };
+    room.queue.push(item);
   }
 
   function updateStaff(state: GameState): void {
@@ -165,7 +187,12 @@ namespace SCPGame {
         if (member.taskProgress >= 100) {
           member.status = "working";
           member.taskProgress = 0;
-          member.experience = clamp(member.experience + 5, 0, 100);
+          member.experience = clamp(member.experience + 9, 0, 100);
+          Object.keys(member.skills).forEach((key) => {
+            const skill = key as keyof SkillSet;
+            const specialist = member.role === "researcher" && skill === "research" || member.role === "guard" && skill === "security" || member.role === "engineer" && skill === "engineering" || member.role === "medic" && skill === "medicine";
+            member.skills[skill] = clamp(member.skills[skill] + (specialist ? 5 : 1), 0, 100);
+          });
           addNotification(state, "Formation terminée", `${member.name} a achevé sa formation.`, "info");
         }
         return;
@@ -180,7 +207,7 @@ namespace SCPGame {
         member.status = "quarantined";
         const quarantine = findSurfaceRoomByService(state, "quarantine");
         if (quarantine) {
-          quarantine.queue.push(createWorkItem("patient", 8, state.elapsedMinutes, "Contamination du personnel"));
+          queueStaffTreatment(state, member, quarantine, "Contamination du personnel", 8);
           setStaffTarget(state, member, quarantine);
         }
         return;
@@ -190,14 +217,20 @@ namespace SCPGame {
         member.status = "injured";
         const medical = findSurfaceRoomByService(state, "medical");
         if (medical) {
-          medical.queue.push(createWorkItem("patient", 6, state.elapsedMinutes, "Blessure du personnel"));
+          queueStaffTreatment(state, member, medical, "Blessure du personnel", 6);
           setStaffTarget(state, member, medical);
         }
         return;
       }
 
       let desiredRoom: SurfaceRoom | undefined;
-      if (member.needs.hunger > 72) {
+      if (member.status === "quarantined") {
+        desiredRoom = findSurfaceRoomByService(state, "quarantine");
+        if (desiredRoom) queueStaffTreatment(state, member, desiredRoom, "Suivi de quarantaine", 8);
+      } else if (member.status === "injured") {
+        desiredRoom = findSurfaceRoomByService(state, "medical");
+        if (desiredRoom) queueStaffTreatment(state, member, desiredRoom, "Soins du personnel", 6);
+      } else if (member.needs.hunger > 72) {
         desiredRoom = findSurfaceRoomByService(state, "food");
         member.status = "eating";
       } else if (member.needs.fatigue > 75 || member.needs.stress > 78) {
@@ -245,7 +278,9 @@ namespace SCPGame {
           member.position.y += dy / distance * speed;
         }
       } else if (desiredRoom && member.position.layer === "surface") {
-        if (getSurfaceDefinition(desiredRoom.type).services.includes("food")) {
+        if (member.status === "injured" || member.status === "quarantined") {
+          member.needs.stress = clamp(member.needs.stress - 0.03, 0, 100);
+        } else if (getSurfaceDefinition(desiredRoom.type).services.includes("food")) {
           member.needs.hunger = clamp(member.needs.hunger - 0.45, 0, 100);
           member.needs.morale = clamp(member.needs.morale + 0.05, 0, 100);
           if (member.needs.hunger < 25) member.status = "working";
@@ -260,8 +295,9 @@ namespace SCPGame {
       }
 
       if (member.needs.fatigue > 92 || member.needs.stress > 94) {
-        const errorChance = 0.0007 * difficulty;
-        if (Math.random() < errorChance) {
+        const overtimeMultiplier = Boolean(state.flags["night-overtime"]) ? 1.8 : 1;
+        const errorChance = 0.0007 * difficulty * overtimeMultiplier;
+        if (simulationChance(state, `staff-error-${member.id}`, errorChance)) {
           member.needs.health = clamp(member.needs.health - 8, 0, 100);
           state.reputation.personnel = clamp(state.reputation.personnel - 0.5, 0, 100);
           logHistory(state, `Erreur opérationnelle liée à la fatigue de ${member.name}.`);
@@ -371,7 +407,7 @@ namespace SCPGame {
       case "patient":
         state.resources.medical = Math.max(0, state.resources.medical - item.severity * 0.08);
         state.reputation.personnel = clamp(state.reputation.personnel + 0.15, 0, 100);
-        healStaff(state, item.severity * 1.4);
+        healStaff(state, item.severity * 1.4, typeof item.metadata?.staffId === "string" ? item.metadata.staffId : undefined);
         break;
       case "delivery":
         state.resources.food += 0.5 + item.severity * 0.3;
@@ -418,20 +454,26 @@ namespace SCPGame {
     logHistory(state, `Échec de traitement : ${item.source ?? item.kind}.`);
   }
 
-  function healStaff(state: GameState, amount: number): void {
+  function healStaff(state: GameState, amount: number, staffId?: string): void {
     const injured = state.staff
-      .filter((member) => member.status === "injured" || member.needs.health < 100)
+      .filter((member) => (!staffId || member.id === staffId) && (member.status === "injured" || member.status === "quarantined" || member.needs.health < 100 || member.needs.contamination > 0))
       .sort((a, b) => a.needs.health - b.needs.health)[0];
     if (!injured) return;
     injured.needs.health = clamp(injured.needs.health + amount, 0, 100);
     injured.needs.contamination = clamp(injured.needs.contamination - amount * 0.4, 0, 100);
-    if (injured.needs.health > 72 && injured.needs.contamination < 35) injured.status = "working";
+    if (injured.needs.health > 72 && injured.needs.contamination < 35) {
+      injured.status = "working";
+      injured.target = undefined;
+      injured.targetRoomId = undefined;
+      injured.path = [];
+      autoAssignStaff(state);
+    }
   }
 
   function injureRandomStaff(state: GameState, amount: number): void {
     const candidates = state.staff.filter((member) => member.status !== "dead");
     if (candidates.length === 0) return;
-    const member = candidates[Math.floor(Math.random() * candidates.length)];
+    const member = candidates[simulationIndex(state, "injure-staff", candidates.length)];
     member.needs.health = clamp(member.needs.health - amount, 0, 100);
     if (member.needs.health <= 0) {
       member.status = "dead";
@@ -441,8 +483,8 @@ namespace SCPGame {
   }
 
   function repairLowestConditionRoom(state: GameState, amount: number): void {
-    const surface = state.surfaceRooms.sort((a, b) => a.condition - b.condition)[0];
-    const underground = state.undergroundRooms.sort((a, b) => a.condition - b.condition)[0];
+    const surface = [...state.surfaceRooms].sort((a, b) => a.condition - b.condition)[0];
+    const underground = [...state.undergroundRooms].sort((a, b) => a.condition - b.condition)[0];
     if (!surface && !underground) return;
     if (!underground || (surface && surface.condition <= underground.condition)) {
       surface.condition = clamp(surface.condition + amount, 0, 100);
@@ -477,17 +519,18 @@ namespace SCPGame {
     const roomDefinition = getUndergroundDefinition(room.type);
     let score = 20;
 
-    score += clamp((roomDefinition.containment - scpDefinition.requirements.minContainment + 2) * 7, -25, 24);
-    score += clamp((roomDefinition.security - scpDefinition.requirements.minSecurity + 2) * 5, -20, 18);
+    score += clamp((getEffectiveRoomContainment(room) - scpDefinition.requirements.minContainment + 2) * 7, -25, 24);
+    score += clamp((getEffectiveRoomSecurity(room) - scpDefinition.requirements.minSecurity + 2) * 5, -20, 18);
     const tagMatches = scpDefinition.requirements.roomTags.filter((tag) => roomDefinition.tags.includes(tag)).length;
     score += tagMatches * 5;
     score += (room.condition - 60) * 0.22;
 
     const assignedMembers = room.staffAssigned
       .map((id) => state.staff.find((member) => member.id === id))
-      .filter((member): member is StaffMember => Boolean(member && member.status !== "dead" && member.status !== "off-duty"));
+      .filter((member): member is StaffMember => Boolean(member && !["dead", "off-duty", "injured", "quarantined", "training"].includes(member.status)));
     const requiredStaff = Object.values(scpDefinition.requirements.staff).reduce((sum, count) => sum + (count ?? 0), 0);
-    score += requiredStaff === 0 ? 8 : clamp(assignedMembers.length / requiredStaff * 15, 0, 18);
+    const plannedStaff = Math.max(requiredStaff, procedure.assignedStaff);
+    score += plannedStaff === 0 ? 8 : clamp(assignedMembers.length / plannedStaff * 15, 0, 18);
     const avgTraining = assignedMembers.length ? assignedMembers.reduce((sum, member) => sum + member.experience, 0) / assignedMembers.length : 0;
     score += clamp((avgTraining - procedure.trainingRequired) * 0.15, -12, 8);
 
@@ -513,7 +556,7 @@ namespace SCPGame {
     score += scp.knowledge * 0.08;
 
     if (scp.definitionId === "scp-173") {
-      if (procedure.assignedStaff < 3) score -= 25;
+      if (assignedMembers.length < 3) score -= 25;
       if (procedure.observationLevel >= 80) score += 8;
       const eyes = state.scps.find((candidate) => candidate.definitionId === "scp-131" && candidate.contained);
       if (eyes && eyes.roomId && state.undergroundRooms.find((candidate) => candidate.id === eyes.roomId)?.level === room.level) score += 5;
@@ -554,8 +597,17 @@ namespace SCPGame {
       const conditionPenalty = Math.max(0, 65 - room.condition) * 0.04;
       const randomNoise = (Math.sin((state.elapsedMinutes + definition.risk * 19) / 73) + 1) * 0.04;
       scp.breachRisk = clamp(scp.breachRisk + basePressure + complianceEffect + conditionPenalty + supplyShortage + randomNoise - (compliance > 75 ? 0.9 : 0), 0, 120);
+      const previousResearchProgress = scp.researchProgress;
       scp.researchProgress = clamp(scp.researchProgress + Math.max(0.1, compliance / 120), 0, 100);
       scp.knowledge = clamp(scp.knowledge + compliance / 700, 0, 100);
+      const researchFlag = `scp-research-complete:${scp.definitionId}`;
+      if (previousResearchProgress < 100 && scp.researchProgress >= 100 && !Boolean(state.flags[researchFlag])) {
+        state.flags[researchFlag] = true;
+        state.resources.research += definition.researchValue;
+        scp.knowledge = clamp(scp.knowledge + 12, 0, 100);
+        addNotification(state, `Étude ${definition.designation} consolidée`, `Le dossier accorde ${definition.researchValue} points de recherche.`, "info");
+        logHistory(state, `Programme d'étude ${definition.designation} achevé.`);
+      }
       scp.daysContained += 1 / 24;
       scp.mood = clamp(scp.mood + (procedure.humaneCare ? 0.4 : -0.25) - definition.risk * 0.015, 0, 100);
 
@@ -566,9 +618,9 @@ namespace SCPGame {
         });
         scp.breachRisk = clamp(scp.breachRisk - 2, 0, 100);
       }
-      if (scp.definitionId === "scp-914" && compliance > 75 && Math.random() < 0.18) state.resources.parts += 1.5;
-      if (scp.definitionId === "scp-294" && compliance > 70 && Math.random() < 0.15) state.resources.medical += 0.6;
-      if (scp.definitionId === "scp-087" && !procedure.restrictedTesting && Math.random() < 0.08) scp.breachRisk += 8;
+      if (scp.definitionId === "scp-914" && compliance > 75 && simulationChance(state, `scp-914-${scp.id}`, 0.18)) state.resources.parts += 1.5;
+      if (scp.definitionId === "scp-294" && compliance > 70 && simulationChance(state, `scp-294-${scp.id}`, 0.15)) state.resources.medical += 0.6;
+      if (scp.definitionId === "scp-087" && !procedure.restrictedTesting && simulationChance(state, `scp-087-${scp.id}`, 0.08)) scp.breachRisk += 8;
 
       if (compliance >= 80) scp.activeEffect = "Confinement nominal";
       else if (compliance >= 60) scp.activeEffect = "Confinement sous surveillance";
@@ -652,10 +704,6 @@ namespace SCPGame {
     }
     state.flags["surface-blackout"] = false;
 
-    const stableKeter = state.scps.some((scp) => scp.contained && getSCPDefinition(scp.definitionId).objectClass === "Keter" && scp.breachRisk < 25);
-    if (stableKeter) state.flags["stable-keter-days"] = Number(state.flags["stable-keter-days"] ?? 0) + 1;
-    else state.flags["stable-keter-days"] = 0;
-
     addNotification(state, `Rapport journalier J${state.day}`, `Budget : +${formatNumber(income)} / -${formatNumber(costs)}. Personnel actif : ${activeStaff.length}.`, costs > income ? "major" : "info");
     logHistory(state, `Clôture journalière : revenus ${formatNumber(income)}, coûts ${formatNumber(costs)}.`);
 
@@ -701,7 +749,11 @@ namespace SCPGame {
     state.events.unshift(event);
     state.currentEventId = event.id;
     state.flags["last-random-event"] = state.elapsedMinutes;
-    if (template.blocking) state.speed = 0;
+    if (template.blocking) {
+      state.flags["event-player-paused"] = state.speed === 0;
+      if (state.speed > 0) state.previousSpeed = state.speed;
+      state.speed = 0;
+    }
     addNotification(state, template.title, template.body, template.severity);
   }
 
@@ -716,7 +768,9 @@ namespace SCPGame {
     event.resolved = true;
     state.currentEventId = undefined;
     logHistory(state, `${event.title} — décision : ${choice.label}.`);
-    if (!state.crisis.active && state.speed === 0) state.speed = state.previousSpeed || 1;
+    const playerWasPaused = Boolean(state.flags["event-player-paused"]);
+    state.flags["event-player-paused"] = false;
+    if (!playerWasPaused && !state.crisis.active && state.speed === 0) state.speed = state.previousSpeed || 1;
     return { ok: true, message: choice.label };
   }
 
@@ -758,7 +812,10 @@ namespace SCPGame {
         }
         break;
       case "flag":
-        if (effect.key) state.flags[effect.key] = effect.value ?? true;
+        if (effect.key) {
+          state.flags[effect.key] = effect.value ?? true;
+          state.flags[`${effect.key}:at`] = state.elapsedMinutes;
+        }
         break;
       case "log":
         logHistory(state, String(effect.value ?? "Événement enregistré."));
@@ -849,8 +906,10 @@ namespace SCPGame {
       "amnestic-response": { medical: 4, intel: 2 }
     };
     const cost = costs[type] ?? {};
+    const assigned = getAvailableCrisisStaff(state, type);
+    if (assigned <= 0) return { ok: false, message: "Aucun effectif disponible pour cet ordre." };
+    if (type === "deploy-mtf" && assigned < 2 && !state.surfaceRooms.some((room) => room.type === "mtf-bay")) return { ok: false, message: "Aucune capacité FTM disponible." };
     if (!payCost(state.resources, cost)) return { ok: false, message: "Ressources insuffisantes." };
-    if (type === "deploy-mtf" && state.staff.filter((member) => member.role === "mtf" && member.status !== "dead").length < 2 && !state.surfaceRooms.some((room) => room.type === "mtf-bay")) return { ok: false, message: "Aucune capacité FTM disponible." };
 
     const durations: Record<CrisisOrderType, number> = {
       "lockdown": 18,
@@ -863,7 +922,6 @@ namespace SCPGame {
       "seal-ventilation": 28,
       "amnestic-response": 45
     };
-    const assigned = type === "deploy-mtf" ? Math.max(2, state.staff.filter((member) => member.role === "mtf" && member.status !== "dead").length) : type === "deploy-security" ? Math.max(2, state.staff.filter((member) => member.role === "guard" && member.status !== "dead").length) : type === "restore-power" || type === "lockdown" || type === "seal-ventilation" ? Math.max(1, state.staff.filter((member) => member.role === "engineer" && member.status !== "dead").length) : type === "medical-response" || type === "decontaminate" ? Math.max(1, state.staff.filter((member) => member.role === "medic" && member.status !== "dead").length) : 2;
     const order: CrisisOrder = {
       id: uid("order"),
       type,
@@ -921,7 +979,7 @@ namespace SCPGame {
         if (crisis.type === "biohazard" || crisis.sourceScpId && getSCPDefinition(state.scps.find((scp) => scp.id === crisis.sourceScpId)?.definitionId ?? "scp-173").id === "scp-008") {
           zone.contamination = clamp(zone.contamination + zone.threat * 0.015 * (zone.sealed ? 0.5 : 1), 0, 100);
         }
-        if (zone.threat > 55 && zone.population > 0 && Math.random() < 0.08 * crisis.severity / 10) {
+        if (zone.threat > 55 && zone.population > 0 && simulationChance(state, `crisis-casualty-${zone.id}`, 0.08 * crisis.severity / 10)) {
           zone.casualties += 1;
           zone.population = Math.max(0, zone.population - 1);
           crisis.siteIntegrity = clamp(crisis.siteIntegrity - 1.8, 0, 100);
@@ -940,9 +998,88 @@ namespace SCPGame {
   }
 
   function averageRoleSkill(state: GameState, role: StaffRole, skill: keyof SkillSet): number {
-    const members = state.staff.filter((member) => member.role === role && member.status !== "dead");
+    const members = state.staff.filter((member) => member.role === role && isStaffAvailableForCrisis(state, member));
     if (members.length === 0) return 10;
     return members.reduce((sum, member) => sum + member.skills[skill], 0) / members.length;
+  }
+
+  function updateKeterStability(state: GameState): void {
+    const stableKeter = state.scps.some((scp) => scp.contained && getSCPDefinition(scp.definitionId).objectClass === "Keter" && scp.breachRisk < 25);
+    const minutes = stableKeter ? Number(state.flags["stable-keter-minutes"] ?? 0) + 1 : 0;
+    state.flags["stable-keter-minutes"] = minutes;
+    state.flags["stable-keter-days"] = Math.floor(minutes / 1440);
+  }
+
+  function updateInternalSecurity(state: GameState): void {
+    const active = state.staff.filter((member) => member.status !== "dead" && member.role !== "director");
+    if (active.length === 0) return;
+    const authentication = isResearchUnlockActive(state, "biometric-monitoring") || isResearchUnlockActive(state, "analog-backup");
+    const contained = Boolean(state.flags["infiltration-contained"]);
+    const chance = clamp(0.0015 + state.reputation.suspicion / 5000, 0.0015, 0.022) * (authentication ? 0.45 : 1) * (contained ? 0.35 : 1);
+    if (!active.some((member) => member.compromised) && simulationChance(state, "internal-compromise", chance)) {
+      const candidate = [...active].sort((a, b) => a.loyalty - b.loyalty || a.id.localeCompare(b.id))[0];
+      candidate.compromised = true;
+      candidate.loyalty = clamp(candidate.loyalty - 8, 0, 100);
+      addNotification(state, "Anomalie d'habilitation", "La sécurité interne signale des accès incohérents. Lancez des vérifications ciblées.", "major");
+      logHistory(state, "SCiPnet détecte une signature d'accès interne incohérente.");
+    }
+    if (state.elapsedMinutes % 360 === 0) {
+      const threats = active.filter((member) => member.compromised);
+      if (threats.length > 0) {
+        state.resources.intel = Math.max(0, state.resources.intel - threats.length);
+        state.reputation.suspicion = clamp(state.reputation.suspicion + threats.length * 0.7, 0, 100);
+        addQueueItem(state, "access", 3 + threats.length, "access", "Trafic d'identité incohérent");
+      }
+    }
+  }
+
+  function updateDeferredConsequences(state: GameState): void {
+    const age = (key: string): number => state.elapsedMinutes - Number(state.flags[`${key}:at`] ?? state.elapsedMinutes);
+    if (Boolean(state.flags["inspection-delayed"]) && age("inspection-delayed") >= 720) {
+      state.flags["inspection-delayed"] = false;
+      state.reputation.suspicion = clamp(state.reputation.suspicion + 2, 0, 100);
+      addQueueItem(state, "inspection", 8, "cover", "Inspection reprogrammée");
+      addNotification(state, "Inspection reprogrammée", "Le délai est écoulé : l'équipe de couverture doit maintenant absorber un audit renforcé.", "major");
+    }
+    if (Boolean(state.flags["night-overtime"]) && age("night-overtime") >= 720) {
+      state.flags["night-overtime"] = false;
+      addNotification(state, "Relève nocturne normalisée", "La surtension opérationnelle de nuit prend fin.", "info");
+    }
+    if (Boolean(state.flags["infiltration-shadowed"]) && age("infiltration-shadowed") >= 360) {
+      state.flags["infiltration-shadowed"] = false;
+      const threat = state.staff.find((member) => member.compromised);
+      if (threat) {
+        threat.compromised = false;
+        threat.loyalty = clamp(threat.loyalty + 4, 0, 100);
+      }
+      state.resources.intel += threat ? 6 : 3;
+      state.reputation.suspicion = clamp(state.reputation.suspicion - 1, 0, 100);
+      addNotification(state, "Filature conclue", threat ? "Le réseau hostile a été cartographié et son relais interne neutralisé." : "La piste ne révèle aucun relais actif, mais fournit des signatures utiles.", "info");
+    }
+    if (Boolean(state.flags["infiltration-contained"]) && age("infiltration-contained") >= 1440) {
+      state.flags["infiltration-contained"] = false;
+    }
+    if (Boolean(state.flags["ethics-redacted"]) && age("ethics-redacted") >= 1440) {
+      state.flags["ethics-redacted"] = false;
+      state.reputation.ethics = clamp(state.reputation.ethics - 2, 0, 100);
+      state.reputation.command = clamp(state.reputation.command - 1, 0, 100);
+      addQueueItem(state, "inspection", 6, "cover", "Recoupement du Comité d'éthique");
+      addNotification(state, "Recoupement éthique", "Des incohérences dans le rapport expurgé provoquent un contrôle complémentaire.", "major");
+    }
+  }
+
+  function getAvailableCrisisStaff(state: GameState, type: CrisisOrderType): number {
+    const role = CRISIS_ORDER_ROLES[type];
+    if (!role) return state.staff.some((member) => member.role === "director" && member.status !== "dead") ? 1 : 0;
+    const activeOrders = state.crisis.orders.filter((order) => order.status !== "completed" && order.status !== "failed");
+    const alreadyCommitted = activeOrders.reduce((sum, order) => CRISIS_ORDER_ROLES[order.type] === role ? sum + order.assigned : sum, 0);
+    const available = state.staff.filter((member) => member.role === role && isStaffAvailableForCrisis(state, member)).length;
+    const roomReserve = type === "deploy-mtf" && state.surfaceRooms.some((room) => room.type === "mtf-bay" && room.enabled) ? 2 : 0;
+    return Math.max(0, available + roomReserve - alreadyCommitted);
+  }
+
+  function isStaffAvailableForCrisis(state: GameState, member: StaffMember): boolean {
+    return member.status !== "dead" && member.status !== "quarantined" && member.status !== "injured" && member.status !== "training" && (member.status !== "off-duty" || state.crisis.active);
   }
 
   function completeCrisisOrder(state: GameState, order: CrisisOrder): void {
@@ -1020,6 +1157,7 @@ namespace SCPGame {
       if (state.currentChapter >= state.campaign.length - 1) {
         state.victory = true;
         state.speed = 0;
+        saveGame(state, false);
       } else {
         state.currentChapter += 1;
         unlockChapterScps(state, state.currentChapter);
@@ -1040,9 +1178,9 @@ namespace SCPGame {
 
   function evaluateObjective(state: GameState, condition: string): number {
     switch (condition) {
-      case "region-facilities": return state.regionFacilities.length;
+      case "region-facilities": return state.regionFacilities.filter((facility) => facility.type !== "road").length;
       case "surface-core": {
-        const required: SurfaceRoomType[] = ["reception", "checkpoint", "medical", "maintenance", "elevator"];
+        const required: SurfaceRoomType[] = ["reception", "checkpoint", "medical", "maintenance", "elevator", "laboratory", "warehouse", "staff-room"];
         return required.filter((type) => state.surfaceRooms.some((room) => room.type === type)).length;
       }
       case "staff-count": return state.staff.filter((member) => member.status !== "dead").length;
@@ -1063,5 +1201,22 @@ namespace SCPGame {
       case "stable-keter": return Number(state.flags["stable-keter-days"] ?? 0) >= 1 ? 1 : 0;
       default: return 0;
     }
+  }
+
+  function simulationChance(state: GameState, channel: string, probability: number): boolean {
+    const roll = Math.abs(Math.sin((state.seed + state.elapsedMinutes * 13 + hashString(channel) * 7) * 12.9898)) % 1;
+    return roll < probability;
+  }
+
+  function simulationIndex(state: GameState, channel: string, length: number): number {
+    if (length <= 1) return 0;
+    const roll = Math.abs(Math.sin((state.seed + state.elapsedMinutes * 31 + hashString(channel) * 11) * 78.233)) % 1;
+    return Math.min(length - 1, Math.floor(roll * length));
+  }
+
+  function hashString(value: string): number {
+    let hash = 0;
+    for (let index = 0; index < value.length; index += 1) hash = (hash * 31 + value.charCodeAt(index)) | 0;
+    return hash;
   }
 }

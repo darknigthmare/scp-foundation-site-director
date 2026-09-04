@@ -1218,7 +1218,7 @@ namespace SCPGame {
       description: "Améliore la quarantaine, les traitements et la filtration autonome.",
       cost: 55,
       prerequisites: [],
-      unlocks: ["bio-containment", "air-filtration", "biological-control"],
+      unlocks: ["bio-containment", "air-filtration", "biological-control", "redundant-ventilation"],
       category: "medical"
     },
     {
@@ -1614,9 +1614,9 @@ namespace SCPGame {
       title: "Directive 00 — La couverture",
       briefing: "Le commandement régional vous confie un ancien complexe industriel. Rendez la surface crédible, organisez les premiers flux et préparez l'accès aux niveaux inférieurs.",
       objectives: [
-        { id: "build-cover", title: "Façade crédible", description: "Construire au moins 5 installations régionales.", progress: 0, target: 5, complete: false, reward: { funds: 5000, intel: 4 }, condition: "region-facilities" },
-        { id: "surface-core", title: "Cœur opérationnel", description: "Disposer d'un accueil, d'un contrôle d'accès, d'une infirmerie, d'un atelier et d'un ascenseur.", progress: 0, target: 5, complete: false, reward: { funds: 4500, parts: 8 }, condition: "surface-core" },
-        { id: "staff-12", title: "Première équipe", description: "Employer au moins 12 personnes actives.", progress: 0, target: 12, complete: false, reward: { funds: 3000, food: 6 }, condition: "staff-count" }
+        { id: "build-cover", title: "Façade crédible", description: "Exploiter au moins 9 installations régionales non routières.", progress: 0, target: 9, complete: false, reward: { funds: 5000, intel: 4 }, condition: "region-facilities" },
+        { id: "surface-core", title: "Cœur opérationnel", description: "Disposer d'accueil, contrôle, infirmerie, atelier, ascenseur, laboratoire, entrepôt et repos.", progress: 0, target: 8, complete: false, reward: { funds: 4500, parts: 8 }, condition: "surface-core" },
+        { id: "staff-20", title: "Première équipe renforcée", description: "Employer au moins 20 personnes actives pour couvrir les rotations.", progress: 0, target: 20, complete: false, reward: { funds: 3000, food: 6 }, condition: "staff-count" }
       ],
       unlockedScps: ["scp-131", "scp-999", "scp-173"],
       rewardText: "Autorisation d'ouverture du premier secteur Euclid.",

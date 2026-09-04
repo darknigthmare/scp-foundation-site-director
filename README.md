@@ -67,9 +67,10 @@ Le dossier `dist/` est autonome et peut être publié tel quel sur Vercel, Netli
 
 | Action | Souris / tactile | Clavier |
 |---|---|---|
-| Sélectionner / construire | Clic ou toucher | — |
+| Déplacer le curseur de grille | Pointer ou toucher | Flèches, `Home` pour recentrer |
+| Sélectionner / construire | Clic ou toucher | `Entrée` sur le Canvas |
 | Déplacer la caméra | Glisser | — |
-| Zoomer | Molette | — |
+| Zoomer | Molette | Canvas focalisé : `+`, `-`, `PageUp`, `PageDown` |
 | Région | Navigation latérale | `1` |
 | Surface | Navigation latérale | `2` |
 | Sous-sol | Navigation latérale | `3` |
@@ -95,7 +96,8 @@ Le dossier `dist/` est autonome et peut être publié tel quel sur Vercel, Netli
 - **Sauvegarde manuelle** depuis le menu Gestion.
 - **Autosauvegarde** périodique et à la fermeture de la page.
 - **Export JSON** pour archiver ou transférer une partie.
-- **Import JSON** avec validation de structure.
+- **Import JSON** avec validation, bornage, migration et normalisation des anciens champs.
+- **Continuer/Charger** choisit la copie la plus récente entre sauvegarde manuelle et autosauvegarde, selon son horodatage.
 
 Clés locales utilisées :
 
@@ -111,6 +113,8 @@ npm run build
 npm run check
 npm test
 ```
+
+`npm test` reconstruit le bundle TypeScript, exécute les 12 tests métier Node et contrôle la structure publiable, les icônes PWA, la licence et l'attribution. Les validations navigateur, mobile, PWA installée et HTTP sont documentées séparément dans le rapport QA.
 
 Test navigateur complet facultatif, si Python et Playwright sont disponibles :
 
@@ -150,6 +154,7 @@ Le rapport du dernier passage est dans `tests/smoke-report.json`. Les captures d
 - [Architecture technique](docs/ARCHITECTURE.md)
 - [Catalogue du contenu](docs/CONTENT_CATALOG.md)
 - [Rapport QA](docs/QA_REPORT.md)
+- [Notes de version](RELEASE_NOTES.md)
 - [Feuille de route](docs/ROADMAP.md)
 - [Prompt cumulatif pour poursuivre avec Codex](docs/PROMPT_CODEX_CONTINUATION.md)
 - [Attributions SCP](ATTRIBUTION.md)
