@@ -261,3 +261,14 @@ test("un agent ne reçoit pas les bénéfices d'une salle inaccessible", () => {
   game.advanceSimulation(state, 1);
   assert.ok(member.needs.hunger >= before);
 });
+
+test("la navigation contourne les cases bloquées et refuse une destination isolée", () => {
+  const game = loadGameNamespace();
+  const blocked = new Set(["1,0", "1,1"]);
+  const path = game.getManhattanPath({ x: 0, y: 0 }, { x: 2, y: 0 }, 3, 3, blocked);
+  assert.ok(path.length > 0);
+  assert.ok(path.every(point => !blocked.has(`${point.x},${point.y}`)));
+  assert.deepEqual(JSON.parse(JSON.stringify(path.at(-1))), { x: 2, y: 0 });
+  const sealed = new Set(["1,0", "0,1"]);
+  assert.equal(game.getManhattanPath({ x: 0, y: 0 }, { x: 2, y: 2 }, 3, 3, sealed).length, 0);
+});
