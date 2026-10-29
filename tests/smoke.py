@@ -294,6 +294,74 @@ def run():
                 expect(page.locator("#top-bar")).to_be_visible()
                 expect(page.locator("#left-nav")).to_be_visible()
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), "Débordement horizontal mobile"
+                page.locator('button[data-view="command"]').click()
+                card_frames = page.evaluate("""async () => {
+                    if (document.body.dataset.view !== "command") throw new Error("Vue crise absente");
+                    const canvas = document.getElementById("game-canvas");
+                    const proto = CanvasRenderingContext2D.prototype;
+                    const originalFillText = proto.fillText;
+                    const originalStrokeRect = proto.strokeRect;
+                    const frames = [];
+                    let frame;
+                    let card;
+                    // Observe the renderer's own rectangles and real font metrics;
+                    // no duplicate of its column count, wrapping or card dimensions.
+                    proto.strokeRect = function(x, y, width, height) {
+                        if (this.canvas === canvas && frame && width > 0 && height > 0) {
+                            card = {x, y, width, height, labels: []};
+                            frame.cards.push(card);
+                        }
+                        return originalStrokeRect.apply(this, arguments);
+                    };
+                    proto.fillText = function(text, x, y, maxWidth) {
+                        if (this.canvas === canvas && frame && card
+                            && x >= card.x && x <= card.x + card.width
+                            && y >= card.y && y <= card.y + card.height) {
+                            const metrics = this.measureText(String(text));
+                            const scale = maxWidth === undefined || metrics.width === 0
+                                ? 1 : Math.min(1, maxWidth / metrics.width);
+                            // actualBoundingBoxLeft/Right include the current
+                            // textAlign/direction; ascent/descent use textBaseline.
+                            const bounds = {
+                                left: x - metrics.actualBoundingBoxLeft * scale,
+                                right: x + metrics.actualBoundingBoxRight * scale,
+                                top: y - metrics.actualBoundingBoxAscent,
+                                bottom: y + metrics.actualBoundingBoxDescent
+                            };
+                            card.labels.push(String(text));
+                            frame.texts += 1;
+                            const inset = 1;
+                            if (bounds.left < card.x + inset || bounds.right > card.x + card.width - inset
+                                || bounds.top < card.y + inset || bounds.bottom > card.y + card.height - inset) {
+                                frame.overflow.push({text: String(text), font: this.font,
+                                    align: this.textAlign, bounds,
+                                    card: {x: card.x, y: card.y, width: card.width, height: card.height}});
+                            }
+                        }
+                        return originalFillText.apply(this, arguments);
+                    };
+                    try {
+                        for (let index = 0; index < 2; index += 1) {
+                            frame = {cards: [], texts: 0, overflow: []};
+                            card = undefined;
+                            frames.push(frame);
+                            // Resize is a normal UI event that invalidates the canvas.
+                            window.dispatchEvent(new Event("resize"));
+                            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                        }
+                        return frames;
+                    } finally {
+                        proto.fillText = originalFillText;
+                        proto.strokeRect = originalStrokeRect;
+                    }
+                }""")
+                for frame in card_frames:
+                    assert len(frame["cards"]) >= 3 and frame["texts"] >= 12, "Cartes crise non observées pendant le rendu réel"
+                    labels = [" ".join(card["labels"]).split() for card in frame["cards"]]
+                    labels = [" ".join(words) for words in labels]
+                    for title in ("Surface — accès et accueil", "Surface — médical et quarantaine"):
+                        assert any(title in text for text in labels), f"Titre de zone incomplet: {title}"
+                    assert not frame["overflow"], f"Texte hors de sa carte crise: {json.dumps(frame['overflow'], ensure_ascii=False)}"
                 page.screenshot(path=str(OUT / "mobile.png"), full_page=True)
             step("interface mobile", mobile)
 

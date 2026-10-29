@@ -533,10 +533,34 @@ namespace SCPGame {
 
   interface CommandCard {
     zone: CrisisZone;
+    titleLines: string[];
     x: number;
     y: number;
     width: number;
     height: number;
+  }
+
+  function wrapCanvasLabel(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+    const lines: string[] = [];
+    let line = "";
+    for (const word of text.trim().split(/\s+/)) {
+      const next = line ? `${line} ${word}` : word;
+      if (ctx.measureText(next).width <= maxWidth) {
+        line = next;
+        continue;
+      }
+      if (line) lines.push(line);
+      line = "";
+      // Also retain a long unbroken name without drawing into the next card.
+      for (const character of word) {
+        if (line && ctx.measureText(line + character).width > maxWidth) {
+          lines.push(line);
+          line = character;
+        } else line += character;
+      }
+    }
+    if (line) lines.push(line);
+    return lines.length ? lines : [""];
   }
 
   function commandCards(runtime: RuntimeState, width: number, height: number): CommandCard[] {
@@ -544,9 +568,14 @@ namespace SCPGame {
     const columns = width < 760 ? 2 : 3;
     const gap = 14;
     const cardWidth = Math.min(260, (width - 40 - gap * (columns - 1)) / columns);
-    const cardHeight = 116;
+    runtime.context.save();
+    runtime.context.font = "700 12px system-ui";
+    const titles = zones.map((zone) => wrapCanvasLabel(runtime.context, zone.name, cardWidth - 24));
+    runtime.context.restore();
+    const cardHeight = 128 + (Math.max(1, ...titles.map((lines) => lines.length)) - 1) * 14;
     return zones.map((zone, index) => ({
       zone,
+      titleLines: titles[index],
       x: 20 + (index % columns) * (cardWidth + gap),
       y: 82 + Math.floor(index / columns) * (cardHeight + gap),
       width: cardWidth,
@@ -594,15 +623,16 @@ namespace SCPGame {
       ctx.strokeRect(card.x, card.y, card.width, card.height);
       ctx.fillStyle = "#eef3f3";
       ctx.font = "700 12px system-ui";
-      ctx.fillText(card.zone.name, card.x + 12, card.y + 20);
+      card.titleLines.forEach((line, index) => ctx.fillText(line, card.x + 12, card.y + 20 + index * 14));
+      const titleOffset = card.height - 128;
       ctx.font = "10px system-ui";
       ctx.fillStyle = "rgba(231,237,238,.65)";
-      ctx.fillText(`Population ${card.zone.population} · Victimes ${card.zone.casualties}`, card.x + 12, card.y + 38);
-      drawMiniBar(ctx, card.x + 12, card.y + 49, card.width - 24, 8, card.zone.threat, "Menace", card.zone.threat > 65 ? "#df6669" : "#d3ad5a");
-      drawMiniBar(ctx, card.x + 12, card.y + 72, card.width - 24, 6, card.zone.security, "Sécurité", "#68a9d3");
-      drawMiniBar(ctx, card.x + 12, card.y + 93, card.width - 24, 6, card.zone.contamination, "Contam.", "#72bd75");
-      if (card.zone.sealed) drawPill(ctx, card.x + card.width - 34, card.y + 18, "SCELLÉ", "#9c7d42");
-      if (card.zone.evacuated) drawPill(ctx, card.x + card.width - 34, card.y + 36, "ÉVAC.", "#55768d");
+      ctx.fillText(`Population ${card.zone.population} · Victimes ${card.zone.casualties}`, card.x + 12, card.y + 38 + titleOffset);
+      drawMiniBar(ctx, card.x + 12, card.y + 49 + titleOffset, card.width - 24, 8, card.zone.threat, "Menace", card.zone.threat > 65 ? "#df6669" : "#d3ad5a");
+      drawMiniBar(ctx, card.x + 12, card.y + 72 + titleOffset, card.width - 24, 6, card.zone.security, "Sécurité", "#68a9d3");
+      drawMiniBar(ctx, card.x + 12, card.y + 93 + titleOffset, card.width - 24, 6, card.zone.contamination, "Contam.", "#72bd75");
+      if (card.zone.sealed) drawPill(ctx, card.x + card.width - 34, card.y + card.height - 10, "SCELLÉ", "#9c7d42");
+      if (card.zone.evacuated) drawPill(ctx, card.x + card.width - (card.zone.sealed ? 84 : 34), card.y + card.height - 10, "ÉVAC.", "#55768d");
     });
 
     drawLegend(ctx, width, height, [
@@ -742,3 +772,4 @@ namespace SCPGame {
     ctx.fillText(`${label} ${Math.round(value)}%`, x, y - 2);
   }
 }
+

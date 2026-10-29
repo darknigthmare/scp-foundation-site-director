@@ -42,6 +42,8 @@ and [save-systems](https://github.com/gamedev-skills/awesome-gamedev-agent-skill
   receive defaults; malformed present values reject the import rather than
   replacing whole collections with a new game. Camera defaults merge per view.
 - The PWA cache revision is refreshed alongside the gameplay sources.
+- Crisis-card names wrap within their measured width, with a shared header
+  height and separate status badges. Hit-testing uses the same card geometry.
 
 ### Verification commands and evidence
 
@@ -54,7 +56,9 @@ then run `python tests/smoke.py` against the compiled game.
 The browser test serves the actual build over HTTP. It uses native browser
 storage and a persistent profile to verify page reload, complete browser restart
 and offline PWA resume, as well as construction, SCP transfer, management,
-crisis commands and the 430 x 932 mobile layout. Results and screenshots are
+crisis commands and the 430 x 932 mobile layout. The mobile check also measures
+the actual Canvas text bounds and requires the full zone names, catching
+overlapping or truncated labels inside cards. Results and screenshots are
 written to `test-results/smoke/`, including failure evidence. CI uploads
 `scp-build` and `scp-browser-smoke`; inspect the run for the exact commit before
 claiming success.
