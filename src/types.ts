@@ -124,6 +124,54 @@ namespace SCPGame {
     enabled: boolean;
   }
 
+  export type SurfaceAccessSide = "north" | "east" | "south" | "west";
+  export type SurfaceTraffic = "public" | "staff" | "security" | "medical" | "contaminated" | "freight" | "anomaly";
+
+  export interface SurfaceAccessRequest {
+    staffId: string;
+    from: Point;
+    to: Point;
+    requestedAt: number;
+    expiresAt: number;
+  }
+
+  export interface SurfaceAccessCycle extends SurfaceAccessRequest {
+    phase: "entering" | "equalizing" | "exiting";
+    remaining: number;
+  }
+
+  export interface SurfaceAccess {
+    id: string;
+    side: SurfaceAccessSide;
+    offset: number;
+    kind: "door" | "airlock";
+    enabled: boolean;
+    minClearance: 0 | 1 | 2 | 3 | 4 | 5;
+    allowedTraffic: SurfaceTraffic[];
+    direction: "both" | "in" | "out";
+    queueCapacity: number;
+    powered: boolean;
+    airSupply: boolean;
+    queue: SurfaceAccessRequest[];
+    cycle?: SurfaceAccessCycle;
+    passedCount: number;
+    paidFunds: number;
+    paidParts: number;
+  }
+
+  export interface SurfaceAccessConfig {
+    side: SurfaceAccessSide;
+    offset: number;
+    kind: "door" | "airlock";
+    enabled: boolean;
+    minClearance: 0 | 1 | 2 | 3 | 4 | 5;
+    allowedTraffic: SurfaceTraffic[];
+    direction: "both" | "in" | "out";
+    queueCapacity: number;
+    powered: boolean;
+    airSupply: boolean;
+  }
+
   export interface SurfaceRoom {
     id: string;
     type: SurfaceRoomType;
@@ -140,6 +188,7 @@ namespace SCPGame {
     enabled: boolean;
     powerPriority: number;
     name?: string;
+    accessPoints?: SurfaceAccess[];
   }
 
   export interface UndergroundRoom {
@@ -198,6 +247,7 @@ namespace SCPGame {
     loyalty: number;
     compromised: boolean;
     taskProgress: number;
+    routeBlockedReason?: string;
   }
 
   export interface WorkItem {
@@ -471,3 +521,4 @@ namespace SCPGame {
     animationFrame: number;
   }
 }
+

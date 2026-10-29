@@ -35,6 +35,7 @@ namespace SCPGame {
 
     updateUtilityReserves(state);
     updateStaff(state);
+    updateSurfaceAccesses(state);
     updateKeterStability(state);
 
     if (state.elapsedMinutes % 10 === 0) processSurfaceQueues(state);
@@ -149,15 +150,18 @@ namespace SCPGame {
   const ROUTE_RETRY_MINUTES = 10;
 
   function surfaceTopologySignature(state: GameState): string {
-    return JSON.stringify([state.surfaceWidth, state.surfaceHeight, state.surfaceRooms.map((room) =>
-      [room.id, room.type, room.x, room.y, room.width, room.height, room.enabled])]);
+    return JSON.stringify([state.surfaceWidth, state.surfaceHeight, state.resources.power > 1,
+      Boolean(state.flags["surface-blackout"]), state.surfaceRooms.map((room) =>
+      [room.id, room.type, room.x, room.y, room.width, room.height, room.enabled,
+        getSurfaceAccesses(state, room).map((access) => [access.id, access.side, access.offset, access.kind,
+          access.enabled, access.minClearance, access.allowedTraffic, access.direction, access.powered, access.airSupply])])]);
   }
 
   function roomArrivalCell(room: SurfaceRoom): Point {
     return { x: Math.floor(room.x + room.width / 2), y: Math.floor(room.y + room.height / 2) };
   }
 
-  export function planSurfaceRoute(state: GameState, position: LayerPoint, room: SurfaceRoom): Point[] | undefined {
+  export function planSurfaceRoute(state: GameState, position: LayerPoint, room: SurfaceRoom, member?: StaffMember): Point[] | undefined {
     if (!Number.isInteger(state.surfaceWidth) || !Number.isInteger(state.surfaceHeight)
       || state.surfaceWidth <= 0 || state.surfaceHeight <= 0
       || !room.enabled || !state.surfaceRooms.includes(room) || position.layer !== "surface"
@@ -169,8 +173,8 @@ namespace SCPGame {
 
     const start = { x: Math.floor(position.x), y: Math.floor(position.y) };
     const goal = roomArrivalCell(room);
-    // Until doors are modelled, staff may leave their current room and enter
-    // their destination. Every other room footprint remains an obstacle.
+    // The origin and destination interiors are walkable. Their wall crossings
+    // are separately checked against explicit doors, permissions and direction.
     const origin = state.surfaceRooms.find((candidate) => candidate.type !== "corridor"
       && pointInRect(position, candidate.x, candidate.y, candidate.width, candidate.height));
     const blocked = new Set<string>();
@@ -188,12 +192,16 @@ namespace SCPGame {
       for (let x = corridor.x; x < corridor.x + corridor.width; x += 1) {
         for (let y = corridor.y; y < corridor.y + corridor.height; y += 1) {
           const key = `${x},${y}`;
-          if (!closed.has(key)) blocked.delete(key);
+          const explicitWall = state.surfaceRooms.some((occupied) => occupied.type !== "corridor"
+            && occupied.accessPoints !== undefined && occupied.id !== origin?.id && occupied.id !== room.id
+            && pointInRect({ x, y }, occupied.x, occupied.y, occupied.width, occupied.height));
+          if (!closed.has(key) && !explicitWall) blocked.delete(key);
         }
       }
     }
     if (blocked.has(`${start.x},${start.y}`) || blocked.has(`${goal.x},${goal.y}`)) return undefined;
-    const path = getManhattanPath(start, goal, state.surfaceWidth, state.surfaceHeight, blocked);
+    const path = getManhattanPath(start, goal, state.surfaceWidth, state.surfaceHeight, blocked,
+      (from, to) => canTraverseSurfaceAccessEdge(state, from, to, member));
     if (path.length === 0 && (start.x !== goal.x || start.y !== goal.y)) return undefined;
 
     // Replanning halfway through a step must not connect a fractional position
@@ -222,20 +230,33 @@ namespace SCPGame {
 
   function chooseStaffDestination(state: GameState, member: StaffMember, topology: string,
     service?: string, assignedRoom?: SurfaceRoom): SurfaceRoom | undefined {
-    const intent = assignedRoom ? `room:${assignedRoom.id}` : service ? `service:${service}` : "";
-    if (!intent || member.position.layer !== "surface") {
+    const destinationIntent = assignedRoom ? `room:${assignedRoom.id}` : service ? `service:${service}` : "";
+    const intent = `${destinationIntent}:${member.clearance}:${getStaffSurfaceTraffic(member)}`;
+    if (!destinationIntent || member.position.layer !== "surface") {
       clearStaffRoute(member);
+      member.routeBlockedReason = undefined;
       return undefined;
     }
     const matches = (room: SurfaceRoom): boolean => room.enabled
       && (assignedRoom ? room.id === assignedRoom.id : getSurfaceDefinition(room.type).services.includes(service as string));
+    const waiting = getStaffSurfaceAccessWait(state, member);
+    const queuedDestination = waiting ? state.surfaceRooms.find((candidate) => candidate.id === member.targetRoomId && matches(candidate)) : undefined;
+    if (queuedDestination) {
+      // Preserve FIFO order and the original expiry through temporary outages,
+      // while a changed task or access profile still leaves the queue below.
+      rememberStaffRoute(state, member, topology, intent);
+      return queuedDestination;
+    }
     const cache = staffRouteCache.get(member);
     if (cache?.state === state && cache.topology === topology && cache.intent === intent
       && cache.path === member.path && cache.pathIndex === member.pathIndex
       && cache.position.x === member.position.x && cache.position.y === member.position.y) {
       if (cache.roomId && cache.roomId === member.targetRoomId) {
         const cachedRoom = state.surfaceRooms.find((candidate) => candidate.id === cache.roomId && matches(candidate));
-        if (cachedRoom) return cachedRoom;
+        if (cachedRoom) {
+          member.routeBlockedReason = undefined;
+          return cachedRoom;
+        }
       } else if (!cache.roomId && !member.targetRoomId && state.elapsedMinutes >= cache.checkedAt
         && state.elapsedMinutes - cache.checkedAt < ROUTE_RETRY_MINUTES) {
         return undefined;
@@ -247,16 +268,18 @@ namespace SCPGame {
     const current = candidates.find((candidate) => candidate.id === member.targetRoomId);
     const ordered = current ? [current, ...candidates.filter((candidate) => candidate !== current)] : candidates;
     for (const candidate of ordered) {
-      const path = planSurfaceRoute(state, member.position, candidate);
+      const path = planSurfaceRoute(state, member.position, candidate, member);
       if (path === undefined) continue;
       member.target = { layer: "surface", ...getRoomCenter(candidate) };
       member.targetRoomId = candidate.id;
-      member.path = path;
-      member.pathIndex = 0;
+      member.path = path.length ? [{ x: member.position.x, y: member.position.y }, ...path] : [];
+      member.pathIndex = path.length ? 1 : 0;
+      member.routeBlockedReason = undefined;
       rememberStaffRoute(state, member, topology, intent);
       return candidate;
     }
     clearStaffRoute(member);
+    member.routeBlockedReason = describeSurfaceRouteFailure(state, member, candidates);
     rememberStaffRoute(state, member, topology, intent);
     return undefined;
   }
@@ -289,6 +312,20 @@ namespace SCPGame {
 
     state.staff.forEach((member) => {
       if (member.status === "dead") return;
+      // Once admitted, finish or safely evacuate this one-edge transit before
+      // changing shift, assignment or need destination. No remote work occurs.
+      if (isStaffInSurfaceAccess(state, member)) {
+        if (member.needs.contamination > 65) member.status = "quarantined";
+        else if (member.needs.health < 45 && member.status !== "quarantined") member.status = "injured";
+        member.needs.hunger = clamp(member.needs.hunger + 0.022, 0, 100);
+        member.needs.fatigue = clamp(member.needs.fatigue + 0.018, 0, 100);
+        return;
+      }
+      if (processPartialSurfaceAccessStep(state, member)) {
+        member.needs.hunger = clamp(member.needs.hunger + 0.022, 0, 100);
+        member.needs.fatigue = clamp(member.needs.fatigue + 0.018, 0, 100);
+        return;
+      }
       const onShift = isOnShift(member, state.minuteOfDay);
       const difficulty = getDifficultyMultiplier(state.settings.difficulty);
 
@@ -376,12 +413,15 @@ namespace SCPGame {
 
       if (desiredRoom && member.path.length > member.pathIndex && member.position.layer === "surface") {
         const target = member.path[member.pathIndex];
+        const accessHandled = processSurfaceAccessStep(state, member, target);
         // Accessibility preferences affect rendering only, never simulation outcomes.
         const speed = 0.55;
         const dx = target.x - member.position.x;
         const dy = target.y - member.position.y;
         const distance = Math.hypot(dx, dy);
-        if (distance <= speed) {
+        if (accessHandled) {
+          // Waiting or admitted airlock staff stay on their source cell.
+        } else if (distance <= speed) {
           member.position.x = target.x;
           member.position.y = target.y;
           member.pathIndex += 1;
@@ -617,6 +657,7 @@ namespace SCPGame {
     member.needs.health = clamp(member.needs.health - amount, 0, 100);
     if (member.needs.health <= 0) {
       member.status = "dead";
+      cancelStaffSurfaceAccess(state, member.id);
       state.reputation.personnel = clamp(state.reputation.personnel - 5, 0, 100);
       logHistory(state, `${member.name} est décédé en service.`);
     }

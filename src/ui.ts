@@ -1,11 +1,20 @@
 namespace SCPGame {
   let activeRuntime: RuntimeState | undefined;
-  let modalMode: "none" | "event" | "procedure" | "import" | "new-game" | "help" | "credits" = "none";
+  let modalMode: "none" | "event" | "procedure" | "import" | "new-game" | "help" | "credits" | "surface-access" = "none";
   let procedureScpId = "";
+  let accessEditorRoomId = "";
+  let accessEditorAccessId = "";
   let renderedModalKey = "";
   let modalReturnFocus: HTMLElement | undefined;
+  let modalReturnFocusSignature: string | undefined;
   let modalPausedGame = false;
   let renderedEndScreenKey = "";
+  const ACCESS_UI_SIDES: Record<SurfaceAccessSide, string> = { north: "Nord", east: "Est", south: "Sud", west: "Ouest" };
+  const ACCESS_UI_TRAFFIC: Record<SurfaceTraffic, string> = {
+    staff: "Personnel", security: "Sécurité / FTM", medical: "Équipes médicales",
+    contaminated: "Personnel contaminé", freight: "Logistique (personnel)",
+    public: "Public (réservé)", anomaly: "Anomalies (réservé)"
+  };
 
   function escapeHtml(value: string): string {
     return value.replace(/[&<>'"]/g, (character) => ({
@@ -23,7 +32,7 @@ namespace SCPGame {
 
   function focusSignature(element: HTMLElement): string | undefined {
     if (element.id) return `id:${element.id}`;
-    const attributes = ["data-action", "data-view", "data-speed", "data-tab", "data-type", "data-role", "data-staff", "data-node", "data-scp", "data-room", "data-zone", "data-order", "data-setting"];
+    const attributes = ["data-action", "data-view", "data-speed", "data-tab", "data-type", "data-role", "data-staff", "data-node", "data-scp", "data-room", "data-access", "data-zone", "data-order", "data-setting"];
     const selectors = attributes
       .filter((name) => element.hasAttribute(name))
       .map((name) => `[${name}="${String(element.getAttribute(name)).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"]`);
@@ -74,7 +83,10 @@ namespace SCPGame {
   }
 
   function prepareModal(state: GameState, returnFocus: HTMLElement): void {
-    if (modalMode === "none") modalReturnFocus = returnFocus;
+    if (modalMode === "none") {
+      modalReturnFocus = returnFocus;
+      modalReturnFocusSignature = focusSignature(returnFocus);
+    }
     const startScreen = document.getElementById("start-screen");
     if (startScreen?.classList.contains("hidden") && state.speed > 0) {
       state.previousSpeed = state.speed;
@@ -96,6 +108,7 @@ namespace SCPGame {
     document.addEventListener("click", handleDelegatedClick);
     document.addEventListener("change", handleDelegatedChange);
     document.addEventListener("input", handleDelegatedInput);
+    document.addEventListener("submit", handleSurfaceAccessSubmit);
     document.addEventListener("keydown", handleKeyboard);
     const fileInput = document.getElementById("import-file") as HTMLInputElement | null;
     fileInput?.addEventListener("change", handleImportFile);
@@ -237,23 +250,29 @@ namespace SCPGame {
     const selected = state.selectedType === "surface-room" ? state.surfaceRooms.find((entry) => entry.id === state.selectedId) : undefined;
     if (selected) {
       const definition = getSurfaceDefinition(selected.type);
-      const efficiency = selected.staffAssigned.length === 0 && Object.keys(definition.requiredRoles).length > 0 ? "Sous-effectif" : "Opérationnelle";
+      const present = state.staff.filter((member) => selected.staffAssigned.includes(member.id) && member.status === "working"
+        && member.position.layer === "surface" && member.targetRoomId === selected.id
+        && member.position.x === Math.floor(selected.x + selected.width / 2) && member.position.y === Math.floor(selected.y + selected.height / 2)).length;
+      const efficiency = !selected.enabled ? "Fermée" : Object.keys(definition.requiredRoles).length > 0
+        ? `${present} sur place / ${selected.staffAssigned.length} affectés` : "Libre-service";
       return `
         ${renderSelectionHeader(definition.icon, definition.name, efficiency)}
         <p class="muted">${escapeHtml(definition.description)}</p>
         ${renderMetricGrid([
           ["État", percent(selected.condition)],
           ["Propreté", percent(selected.cleanliness)],
-          ["File", String(selected.queue.length)],
+          ["File de service", String(selected.queue.length)],
           ["Personnel", String(selected.staffAssigned.length)]
         ])}
         ${renderAssignedStaff(state, selected.staffAssigned)}
         ${renderSelectionActions()}
+        ${renderSurfaceAccessPanel(state, selected)}
         <hr>
         ${renderBuildCatalog(state, "surface")}
       `;
     }
-    const queues = state.surfaceRooms.reduce((sum, room) => sum + room.queue.length, 0) + state.workItems.length;
+    const queues = state.surfaceRooms.reduce((sum, room) => sum + room.queue.length
+      + getSurfaceAccesses(state, room).reduce((waiting, access) => waiting + access.queue.length, 0), 0) + state.workItems.length;
     return `
       <section class="summary-card">
         <h3>Activité opérationnelle</h3>
@@ -267,6 +286,168 @@ namespace SCPGame {
       <p class="hint">Les salles fonctionnent comme dans un jeu de gestion hospitalière : capacité, personnel, file, maintenance et trajets influencent directement le Site.</p>
       ${renderBuildCatalog(state, "surface")}
     `;
+  }
+
+  function renderSurfaceAccessPanel(state: GameState, room: SurfaceRoom): string {
+    if (room.type === "corridor") return `<p class="hint">Les couloirs sont des espaces de circulation. Les portes et sas se placent sur les limites des autres salles.</p>`;
+    const accesses = getSurfaceAccesses(state, room);
+    return `<section class="surface-access-panel" aria-label="Accès de la salle">
+      <div class="catalog-heading"><h3>Portes et sas</h3><button data-action="add-access" data-room="${escapeHtml(room.id)}">Ajouter un accès</button></div>
+      <p class="hint">Les passages numérotés sur le plan sont les seules entrées et sorties de cette salle. Pour sécuriser toute la salle, configurez ou verrouillez chacun de ses accès.</p>
+      ${accesses.length === 0 ? `<p class="staff-route-status">Salle sans accès : aucun agent ne peut franchir ses limites.</p>` : ""}
+      <div class="surface-access-list">${accesses.map((access, index) => {
+        const attrs = `data-room="${escapeHtml(room.id)}" data-access="${escapeHtml(access.id)}"`;
+        const occupant = access.cycle ? state.staff.find((member) => member.id === access.cycle?.staffId) : undefined;
+        const status = getSurfaceAccessStatus(state, room, access);
+        const traffic = access.allowedTraffic.map((kind) => ACCESS_UI_TRAFFIC[kind]).join(", ") || "Aucun flux autorisé";
+        const direction = access.direction === "in" ? "Entrée seule" : access.direction === "out" ? "Sortie seule" : "Dans les deux sens";
+        const waiting = access.queue.map((request) => {
+          const member = state.staff.find((entry) => entry.id === request.staffId);
+          return `${member?.name ?? "Agent absent"} · ${Math.max(0, Math.ceil(request.expiresAt - state.elapsedMinutes))} min avant expiration`;
+        });
+        return `<article class="surface-access-card ${access.enabled ? "" : "access-locked"}" data-access-id="${escapeHtml(access.id)}">
+          <header><strong><b class="access-number">${index + 1}</b>${access.kind === "airlock" ? "Sas interverrouillé" : "Porte"}</strong><span>${ACCESS_UI_SIDES[access.side]} · case ${access.offset + 1}</span></header>
+          <p class="access-status">${escapeHtml(status)}</p>
+          <p>Niveau ${access.minClearance} minimum · ${direction}</p>
+          <p class="access-traffic-label">${escapeHtml(traffic)}</p>
+          ${access.kind === "door" ? `<p>Passages réussis : ${access.passedCount}</p>` : ""}
+          ${access.kind === "airlock" ? `<dl class="access-metrics"><div><dt>File</dt><dd>${access.queue.length} / ${access.queueCapacity}</dd></div><div><dt>Passages</dt><dd>${access.passedCount}</dd></div></dl>
+            <p>${occupant ? `Dans le sas : ${escapeHtml(occupant.name)} · ${access.cycle?.remaining ?? 0} min dans cette phase` : "Sas libre"}</p>
+            ${waiting.length ? `<ol class="access-waiting">${waiting.map((label) => `<li>${escapeHtml(label)}</li>`).join("")}</ol>` : ""}
+            <p class="access-supplies">Électricité locale : ${access.powered ? "raccordée" : "coupée"} · Air : ${access.airSupply ? "disponible" : "coupé"}</p>` : ""}
+          <div class="action-row"><button data-action="edit-access" ${attrs}>Configurer</button><button data-action="toggle-access" ${attrs}>${access.enabled ? "Verrouiller" : "Déverrouiller"}</button><button class="danger" data-action="remove-access" ${attrs} ${access.cycle ? "disabled" : ""}>Démonter</button></div>
+          ${access.kind === "airlock" ? `<div class="action-row"><button data-action="toggle-access-power" ${attrs}>${access.powered ? "Couper l’électricité" : "Rétablir l’électricité"}</button><button data-action="toggle-access-air" ${attrs}>${access.airSupply ? "Couper l’air" : "Rétablir l’air"}</button></div>
+            <button class="wide-button warning" data-action="evacuate-access" ${attrs} ${access.cycle || access.queue.length ? "" : "disabled"}>Évacuer côté d’origine et verrouiller</button>` : ""}
+        </article>`;
+      }).join("")}</div>
+      <p class="hint">Démontage : récupération de 35 % des crédits et 40 % des pièces payés. Les accès inclus dans la salle n’offrent aucun remboursement.</p>
+    </section>`;
+  }
+
+  function accessDefaultConfig(state: GameState, room: SurfaceRoom): SurfaceAccessConfig {
+    const config: SurfaceAccessConfig = {
+      side: "south", offset: 0, kind: "door", enabled: true, minClearance: 0,
+      allowedTraffic: Object.keys(ACCESS_UI_TRAFFIC) as SurfaceTraffic[], direction: "both",
+      queueCapacity: 4, powered: true, airSupply: true
+    };
+    const accesses = getSurfaceAccesses(state, room);
+    for (const side of ["south", "north", "east", "west"] as SurfaceAccessSide[]) {
+      const length = side === "north" || side === "south" ? room.width : room.height;
+      for (let offset = 0; offset < length; offset += 1) {
+        if (accesses.some((access) => access.side === side && access.offset === offset)) continue;
+        const { outside } = getSurfaceAccessCells(room, { side, offset });
+        if (outside.x < 0 || outside.y < 0 || outside.x >= state.surfaceWidth || outside.y >= state.surfaceHeight) continue;
+        if (state.surfaceRooms.some((other) => other.id !== room.id && other.type !== "corridor"
+          && pointInRect(outside, other.x, other.y, other.width, other.height))) continue;
+        return { ...config, side, offset };
+      }
+    }
+    return config;
+  }
+
+  function renderSurfaceAccessModal(state: GameState): string {
+    const room = state.surfaceRooms.find((candidate) => candidate.id === accessEditorRoomId);
+    const access = room && accessEditorAccessId ? getSurfaceAccesses(state, room).find((candidate) => candidate.id === accessEditorAccessId) : undefined;
+    if (!room || accessEditorAccessId && !access) return `<div class="modal-card"><header><h2 id="modal-title">Accès introuvable</h2><button data-action="close-modal" aria-label="Fermer">×</button></header><p>La salle ou le passage sélectionné n’existe plus.</p></div>`;
+    const config = access ?? accessDefaultConfig(state, room);
+    return `<form id="surface-access-form" class="modal-card access-modal" aria-describedby="access-editor-description">
+      <header><div><span>CONTRÔLE DES ACCÈS</span><h2 id="modal-title">${access ? "Configurer le passage" : "Ajouter une porte ou un sas"}</h2></div><button type="button" data-action="close-modal" aria-label="Fermer">×</button></header>
+      <p id="access-editor-description">${escapeHtml(getSurfaceDefinition(room.type).name)}. Choisissez une case sur un mur de la salle. L’emplacement est compté de gauche à droite au nord et au sud, et de haut en bas à l’est et à l’ouest.</p>
+      <div class="access-editor-layout">
+        <div class="access-field-grid">
+          <label for="access-kind">Type<select id="access-kind" ${access ? "disabled" : ""}><option value="door" ${config.kind === "door" ? "selected" : ""}>Porte</option><option value="airlock" ${config.kind === "airlock" ? "selected" : ""}>Sas interverrouillé</option></select></label>
+          <label for="access-side">Mur<select id="access-side">${(Object.keys(ACCESS_UI_SIDES) as SurfaceAccessSide[]).map((side) => `<option value="${side}" ${config.side === side ? "selected" : ""}>${ACCESS_UI_SIDES[side]}</option>`).join("")}</select></label>
+          <label for="access-offset">Emplacement sur le mur<input id="access-offset" type="number" inputmode="numeric" min="1" max="${config.side === "north" || config.side === "south" ? room.width : room.height}" step="1" value="${config.offset + 1}" required></label>
+          <label for="access-clearance">Habilitation minimale<select id="access-clearance">${[0, 1, 2, 3, 4, 5].map((level) => `<option value="${level}" ${config.minClearance === level ? "selected" : ""}>Niveau ${level}</option>`).join("")}</select></label>
+          <label for="access-direction">Sens de circulation<select id="access-direction"><option value="both" ${config.direction === "both" ? "selected" : ""}>Entrée et sortie</option><option value="in" ${config.direction === "in" ? "selected" : ""}>Entrée seule</option><option value="out" ${config.direction === "out" ? "selected" : ""}>Sortie seule</option></select></label>
+          <label for="access-capacity" data-airlock-field>Places en attente<input id="access-capacity" type="number" inputmode="numeric" min="1" max="16" step="1" value="${config.queueCapacity}" required></label>
+        </div>
+        <div class="access-preview-block"><div class="access-plan" id="access-preview" role="img"><span>${escapeHtml(getSurfaceDefinition(room.type).name)}<small>${room.width} × ${room.height} cases</small></span><i id="access-preview-marker" aria-hidden="true"></i></div><p id="access-placement-hint" class="hint" aria-live="polite"></p></div>
+      </div>
+      <fieldset class="access-traffic-options"><legend>Flux autorisés</legend><div>${(Object.keys(ACCESS_UI_TRAFFIC) as SurfaceTraffic[]).map((traffic) => `<label><input type="checkbox" data-access-traffic="${traffic}" ${config.allowedTraffic.includes(traffic) ? "checked" : ""}>${ACCESS_UI_TRAFFIC[traffic]}</label>`).join("")}</div><p class="hint">Au-delà de 65 % de contamination, le filtre « Personnel contaminé » remplace celui du métier. Public et anomalies sont réservés aux futures circulations dédiées.</p></fieldset>
+      <div class="access-switches"><label><input id="access-enabled" type="checkbox" ${config.enabled ? "checked" : ""}> Passage déverrouillé</label><label data-airlock-field><input id="access-powered" type="checkbox" ${config.powered ? "checked" : ""}> Électricité locale raccordée</label><label data-airlock-field><input id="access-air-supply" type="checkbox" ${config.airSupply ? "checked" : ""}> Air disponible</label></div>
+      <p class="hint" data-airlock-field>Une personne à la fois, dans l’ordre d’arrivée. Les deux portes ne s’ouvrent jamais ensemble. Une coupure d’électricité ou d’air suspend le cycle, portes fermées. L’évacuation ramène l’occupant du côté d’origine et verrouille le passage.</p>
+      ${access?.cycle || access?.queue.length ? `<p class="staff-route-status">Passage occupé : évacuez-le avant de modifier son emplacement, ses habilitations ou son sens. Sa capacité ne peut pas être réduite sous la file actuelle. Vous pouvez encore agir sur son verrouillage et ses alimentations.</p>` : ""}
+      <p id="access-form-error" class="status-danger" role="alert"></p>
+      <footer><span id="access-cost">${access ? "Configuration sans frais" : "250 crédits · 2 pièces"}</span><button type="submit" data-action="save-access">${access ? "Enregistrer" : "Installer le passage"}</button></footer>
+    </form>`;
+  }
+
+  function updateSurfaceAccessForm(state: GameState): void {
+    if (modalMode !== "surface-access") return;
+    const room = state.surfaceRooms.find((candidate) => candidate.id === accessEditorRoomId);
+    if (!room) return;
+    const side = (document.getElementById("access-side") as HTMLSelectElement | null)?.value as SurfaceAccessSide;
+    const offsetInput = document.getElementById("access-offset") as HTMLInputElement | null;
+    if (!offsetInput || !(side in ACCESS_UI_SIDES)) return;
+    const length = side === "north" || side === "south" ? room.width : room.height;
+    offsetInput.max = String(length);
+    const offset = Number(offsetInput.value) - 1;
+    const marker = document.getElementById("access-preview-marker");
+    const preview = document.getElementById("access-preview");
+    const normalized = clamp((offset + 0.5) / length, 0, 1);
+    if (marker) {
+      marker.style.left = `${side === "west" ? 0 : side === "east" ? 100 : normalized * 100}%`;
+      marker.style.top = `${side === "north" ? 0 : side === "south" ? 100 : normalized * 100}%`;
+      marker.classList.toggle("vertical", side === "east" || side === "west");
+    }
+    preview?.setAttribute("aria-label", `Plan de la salle : accès sur le mur ${ACCESS_UI_SIDES[side]}, emplacement ${offset + 1} sur ${length}.`);
+    let message = `${ACCESS_UI_SIDES[side]} · emplacement ${offset + 1} sur ${length}.`;
+    let invalid = !Number.isInteger(offset) || offset < 0 || offset >= length;
+    if (invalid) message = `Choisissez un emplacement entier entre 1 et ${length}.`;
+    else {
+      const { outside } = getSurfaceAccessCells(room, { side, offset });
+      if (outside.x < 0 || outside.y < 0 || outside.x >= state.surfaceWidth || outside.y >= state.surfaceHeight) {
+        message += " Ce mur donne hors du complexe.";
+        invalid = true;
+      } else if (getSurfaceAccesses(state, room).some((access) => access.id !== accessEditorAccessId && access.side === side && access.offset === offset)) {
+        message += " Un autre accès occupe déjà cette case.";
+        invalid = true;
+      } else if (state.surfaceRooms.some((other) => other.id !== room.id && other.type !== "corridor" && pointInRect(outside, other.x, other.y, other.width, other.height))) {
+        message += " Une salle voisine bloque l’autre côté.";
+        invalid = true;
+      } else message += " L’autre côté est dégagé.";
+    }
+    const hint = document.getElementById("access-placement-hint");
+    if (hint) { hint.textContent = message; hint.classList.toggle("status-danger", invalid); }
+    preview?.classList.toggle("invalid", invalid);
+    const airlock = (document.getElementById("access-kind") as HTMLSelectElement | null)?.value === "airlock";
+    document.querySelectorAll<HTMLElement>("[data-airlock-field]").forEach((element) => { element.hidden = !airlock; });
+    const capacity = document.getElementById("access-capacity") as HTMLInputElement | null;
+    if (capacity) capacity.disabled = !airlock;
+    const price = document.getElementById("access-cost");
+    if (price) price.textContent = accessEditorAccessId ? "Configuration sans frais" : airlock ? "1 000 crédits · 6 pièces" : "250 crédits · 2 pièces";
+  }
+
+  function saveSurfaceAccessFromModal(state: GameState): { ok: boolean; message: string } {
+    const form = document.getElementById("surface-access-form") as HTMLFormElement | null;
+    if (!form || !form.reportValidity()) return { ok: false, message: "Vérifiez les champs du passage." };
+    const value = (id: string): string => (document.getElementById(id) as HTMLInputElement | HTMLSelectElement).value;
+    const checked = (id: string): boolean => (document.getElementById(id) as HTMLInputElement).checked;
+    const config: SurfaceAccessConfig = {
+      side: value("access-side") as SurfaceAccessSide, offset: Number(value("access-offset")) - 1,
+      kind: value("access-kind") as SurfaceAccessConfig["kind"], enabled: checked("access-enabled"),
+      minClearance: Number(value("access-clearance")) as SurfaceAccessConfig["minClearance"],
+      direction: value("access-direction") as SurfaceAccessConfig["direction"], queueCapacity: Number(value("access-capacity")),
+      powered: checked("access-powered"), airSupply: checked("access-air-supply"),
+      allowedTraffic: Array.from(form.querySelectorAll<HTMLInputElement>("[data-access-traffic]:checked")).map((input) => input.dataset.accessTraffic as SurfaceTraffic)
+    };
+    const result = accessEditorAccessId ? updateSurfaceAccess(state, accessEditorRoomId, accessEditorAccessId, config) : addSurfaceAccess(state, accessEditorRoomId, config);
+    if (result.ok) closeModal(state);
+    else {
+      const error = document.getElementById("access-form-error");
+      if (error) error.textContent = result.message;
+    }
+    return result;
+  }
+
+  function handleSurfaceAccessSubmit(event: Event): void {
+    if (!(event.target instanceof HTMLFormElement) || event.target.id !== "surface-access-form" || !activeRuntime) return;
+    event.preventDefault();
+    const result = saveSurfaceAccessFromModal(activeRuntime.state);
+    showToast(result.message, result.ok ? "success" : "error");
+    activeRuntime.uiDirty = true;
+    refreshUI(activeRuntime, true);
   }
 
   function renderUndergroundPanel(state: GameState): string {
@@ -438,6 +619,8 @@ namespace SCPGame {
         ["Fatigue", percent(member.needs.fatigue)],
         ["Stress", percent(member.needs.stress)]
       ])}
+      <p class="access-traffic-label">Circulation : ${escapeHtml(ACCESS_UI_TRAFFIC[getStaffSurfaceTraffic(member)])}</p>
+      ${member.routeBlockedReason ? `<p class="staff-route-status" role="status">${escapeHtml(member.routeBlockedReason)}</p>` : ""}
       <div class="skill-list">
         ${renderSkill("Recherche", member.skills.research)}
         ${renderSkill("Sécurité", member.skills.security)}
@@ -660,17 +843,23 @@ namespace SCPGame {
       setPageInert(false);
       root.classList.add("hidden");
       if (root.innerHTML) root.innerHTML = "";
-      if (renderedModalKey && modalReturnFocus?.isConnected) modalReturnFocus.focus({ preventScroll: true });
+      if (renderedModalKey) {
+        const target = modalReturnFocus?.isConnected ? modalReturnFocus
+          : modalReturnFocusSignature ? findFocusTarget(document.body, modalReturnFocusSignature) : undefined;
+        target?.focus({ preventScroll: true });
+      }
       modalReturnFocus = undefined;
+      modalReturnFocusSignature = undefined;
       renderedModalKey = "";
       return;
     }
     setPageInert(true);
     root.classList.remove("hidden");
     root.tabIndex = -1;
-    const modalKey = modalMode === "event" && currentEvent ? `event:${currentEvent.id}` : modalMode === "procedure" ? `procedure:${procedureScpId}:${state.procedures.find((procedure) => procedure.scpId === procedureScpId || state.scps.find((scp) => scp.id === procedureScpId)?.procedureId === procedure.id)?.version ?? 0}` : modalMode;
+    const modalKey = modalMode === "surface-access" ? `surface-access:${accessEditorRoomId}:${accessEditorAccessId}` : modalMode === "event" && currentEvent ? `event:${currentEvent.id}` : modalMode === "procedure" ? `procedure:${procedureScpId}:${state.procedures.find((procedure) => procedure.scpId === procedureScpId || state.scps.find((scp) => scp.id === procedureScpId)?.procedureId === procedure.id)?.version ?? 0}` : modalMode;
     if (modalKey === renderedModalKey) return;
     if (modalMode === "event" && currentEvent) root.innerHTML = renderEventModal(state, currentEvent);
+    else if (modalMode === "surface-access") { root.innerHTML = renderSurfaceAccessModal(state); updateSurfaceAccessForm(state); }
     else if (modalMode === "procedure") root.innerHTML = renderProcedureModal(state, procedureScpId);
     else if (modalMode === "import") root.innerHTML = renderImportModal();
     else if (modalMode === "new-game") root.innerHTML = renderNewGameModal();
@@ -796,7 +985,7 @@ namespace SCPGame {
 
     const action = target.dataset.action;
     if (!action) return;
-    if (["help", "open-procedure", "import", "new-game", "credits"].includes(action)) prepareModal(state, target);
+    if (["help", "open-procedure", "import", "new-game", "credits", "add-access", "edit-access"].includes(action)) prepareModal(state, target);
     let result: { ok: boolean; message: string } | undefined;
 
     switch (action) {
@@ -816,6 +1005,30 @@ namespace SCPGame {
       case "upgrade-selected": result = upgradeSelected(state); break;
       case "repair-selected": result = repairSelected(state); break;
       case "demolish-selected": result = demolishSelected(state); break;
+      case "add-access":
+      case "edit-access":
+        accessEditorRoomId = String(target.dataset.room);
+        accessEditorAccessId = action === "edit-access" ? String(target.dataset.access) : "";
+        modalMode = "surface-access";
+        break;
+      case "save-access":
+        event.preventDefault();
+        result = saveSurfaceAccessFromModal(state);
+        break;
+      case "toggle-access":
+      case "toggle-access-power":
+      case "toggle-access-air": {
+        const room = state.surfaceRooms.find((entry) => entry.id === target.dataset.room);
+        const access = room ? getSurfaceAccesses(state, room).find((entry) => entry.id === target.dataset.access) : undefined;
+        if (!room || !access) result = { ok: false, message: "Passage introuvable." };
+        else {
+          const key = action === "toggle-access" ? "enabled" : action === "toggle-access-power" ? "powered" : "airSupply";
+          result = updateSurfaceAccess(state, room.id, access.id, { ...access, [key]: !access[key] });
+        }
+        break;
+      }
+      case "remove-access": result = removeSurfaceAccess(state, String(target.dataset.room), String(target.dataset.access)); break;
+      case "evacuate-access": result = evacuateSurfaceAccessAction(state, String(target.dataset.room), String(target.dataset.access)); break;
       case "select-staff": {
         state.selectedId = target.dataset.staff;
         state.selectedType = "staff";
@@ -864,6 +1077,15 @@ namespace SCPGame {
   function handleDelegatedChange(event: Event): void {
     if (!activeRuntime) return;
     const input = event.target as HTMLInputElement;
+    if (input.closest("#surface-access-form")) {
+      if (input.id === "access-side") {
+        const room = activeRuntime.state.surfaceRooms.find((entry) => entry.id === accessEditorRoomId);
+        const offset = document.getElementById("access-offset") as HTMLInputElement | null;
+        if (room && offset) offset.value = String(clamp(Number(offset.value) || 1, 1, input.value === "north" || input.value === "south" ? room.width : room.height));
+      }
+      updateSurfaceAccessForm(activeRuntime.state);
+      return;
+    }
     if (!input.dataset.setting) return;
     const state = activeRuntime.state;
     const key = input.dataset.setting;
@@ -878,6 +1100,7 @@ namespace SCPGame {
 
   function handleDelegatedInput(event: Event): void {
     const input = event.target as HTMLInputElement;
+    if (input.closest("#surface-access-form") && activeRuntime) { updateSurfaceAccessForm(activeRuntime.state); return; }
     const key = input.dataset.procedureRange;
     if (!key) return;
     const label = document.querySelector<HTMLElement>(`[data-range-value="${key}"]`);
@@ -1012,3 +1235,4 @@ namespace SCPGame {
     if (element && element.textContent !== value) element.textContent = value;
   }
 }
+

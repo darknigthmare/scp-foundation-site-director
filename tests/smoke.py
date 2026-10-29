@@ -16,6 +16,7 @@ OUT.mkdir(parents=True, exist_ok=True)
 results = []
 errors = []
 placement = {}
+access_checks = {}
 
 
 @contextmanager
@@ -231,6 +232,176 @@ def run():
                 page.locator('#management-overlay button[data-action="save"]').click()
                 expect(page.locator("#toast")).to_contain_text("Sauvegarde")
 
+            def saved_state():
+                save_from_settings()
+                return page.evaluate("JSON.parse(localStorage.getItem(SCPGame.SAVE_KEY))")
+
+            def select_surface_room(room, snapshot):
+                page.locator('button[data-view="surface"]').click()
+                cancel = page.locator('#right-panel button[data-action="cancel-build"]')
+                if cancel.count():
+                    cancel.click()
+                panel = page.locator("#right-panel")
+                if "mobile-open" in (panel.get_attribute("class") or ""):
+                    panel.locator('[data-action="toggle-panel"]').click()
+                canvas = page.locator("#game-canvas")
+                box = canvas.bounding_box()
+                assert box is not None
+                width, height = box["width"], box["height"]
+                camera = snapshot["camera"]["surface"]
+                cell = max(18, min(38, min(width / (snapshot["surfaceWidth"] + 2), (height - 80) / (snapshot["surfaceHeight"] + 2)))) * camera["zoom"]
+                origin_x = (width - snapshot["surfaceWidth"] * cell) / 2 + camera["offsetX"]
+                origin_y = 62 + camera["offsetY"]
+                canvas.click(position={"x": origin_x + (room["x"] + room["width"] - 0.3) * cell,
+                                       "y": origin_y + (room["y"] + 0.3) * cell})
+                add = page.locator(f'#right-panel [data-action="add-access"][data-room="{room["id"]}"]')
+                if page.viewport_size["width"] < 700 and "mobile-open" not in (panel.get_attribute("class") or ""):
+                    panel.locator('[data-action="toggle-panel"]').click()
+                expect(add).to_be_visible()
+
+            def import_state(snapshot):
+                page.locator('button[data-view="management"]').click()
+                page.locator('button[data-action="management-tab"][data-tab="settings"]').click()
+                page.locator('#management-overlay [data-action="import"]').click()
+                page.locator("#import-file").set_input_files({
+                    "name": "access-browser-fixture.json",
+                    "mimeType": "application/json",
+                    "buffer": json.dumps(snapshot).encode(),
+                })
+                expect(page.locator("#modal-root")).to_be_hidden()
+                expect(page.locator("#toast")).to_contain_text("importée")
+
+            def configure_traffic(values):
+                for traffic in ("public", "staff", "security", "medical", "contaminated", "freight", "anomaly"):
+                    control = page.locator(f'[data-access-traffic="{traffic}"]')
+                    control.set_checked(traffic in values)
+
+            def surface_access_editor():
+                page.locator('button[data-speed="0"]').click()
+                before = saved_state()
+                room = next(room for room in before["surfaceRooms"] if room["type"] == "medical")
+                select_surface_room(room, before)
+                page.locator(f'[data-action="add-access"][data-room="{room["id"]}"]').click()
+                expect(page.locator("#surface-access-form")).to_be_visible()
+                page.select_option("#access-kind", "airlock")
+                page.select_option("#access-side", "south")
+                page.locator("#access-offset").fill("1")
+                page.select_option("#access-clearance", "2")
+                page.locator("#access-capacity").fill("3")
+                configure_traffic({"staff", "security", "medical"})
+                page.locator('[data-action="save-access"]').click()
+                expect(page.locator("#modal-root")).to_be_hidden()
+                after = saved_state()
+                actual_room = next(item for item in after["surfaceRooms"] if item["id"] == room["id"])
+                known = {item["id"] for item in room["accessPoints"]}
+                added = [item for item in actual_room["accessPoints"] if item["id"] not in known]
+                assert len(added) == 1
+                access = added[0]
+                assert access["kind"] == "airlock" and access["side"] == "south" and access["offset"] == 0
+                assert access["minClearance"] == 2 and access["queueCapacity"] == 3
+                assert set(access["allowedTraffic"]) == {"staff", "security", "medical"}
+                assert before["resources"]["funds"] - after["resources"]["funds"] == 1000
+                assert before["resources"]["parts"] - after["resources"]["parts"] == 6
+                select_surface_room(actual_room, after)
+                card = page.locator(f'.surface-access-card[data-access-id="{access["id"]}"]')
+                card.locator('[data-action="edit-access"]').click()
+                expect(page.locator("#access-kind")).to_be_disabled()
+                page.select_option("#access-clearance", "5")
+                page.select_option("#access-direction", "in")
+                configure_traffic({"medical"})
+                page.locator('[data-action="save-access"]').click()
+                card.locator('[data-action="toggle-access"]').click()
+                locked = saved_state()
+                locked_access = next(item for item in next(r for r in locked["surfaceRooms"] if r["id"] == room["id"])["accessPoints"] if item["id"] == access["id"])
+                assert not locked_access["enabled"] and locked_access["minClearance"] == 5
+                assert locked_access["direction"] == "in" and locked_access["allowedTraffic"] == ["medical"]
+                assert locked["resources"]["funds"] == after["resources"]["funds"], "L'édition ne doit pas facturer à nouveau"
+                select_surface_room(actual_room, locked)
+                card.locator('[data-action="toggle-access"]').click()
+                page.screenshot(path=str(OUT / "surface-access-desktop.png"), full_page=True)
+                access_checks.update(room_id=room["id"], access_id=access["id"], placement=True, permissions=True, locking=True)
+
+            step("éditeur de sas, habilitations et verrouillage", surface_access_editor)
+
+            def active_airlock_resume():
+                baseline = saved_state()
+                fixture = page.evaluate("""snapshot => {
+                    const state = SCPGame.importSave(JSON.stringify(snapshot));
+                    const room = state.surfaceRooms.find(room => room.type === 'medical');
+                    const access = room.accessPoints.find(access => access.kind === 'airlock');
+                    const member = state.staff.find(member => member.role === 'medic');
+                    state.surfaceRooms = [room];
+                    state.staff = [member];
+                    state.workItems = [];
+                    state.minuteOfDay = 400;
+                    state.elapsedMinutes = 0;
+                    state.lastAutosave = 0;
+                    state.speed = 1;
+                    state.settings.autoPauseCritical = false;
+                    state.flags['last-random-event'] = 999999;
+                    state.flags['last-work-spawn'] = 999999;
+                    state.flags['surface-blackout'] = false;
+                    state.resources.power = 140;
+                    state.resources.food = 100;
+                    access.enabled = true;
+                    access.minClearance = 0;
+                    access.allowedTraffic = ['medical'];
+                    access.direction = 'both';
+                    access.powered = true;
+                    access.airSupply = true;
+                    access.queue = [];
+                    access.cycle = undefined;
+                    access.passedCount = 0;
+                    room.accessPoints = [access];
+                    room.staffAssigned = [member.id];
+                    room.queue = [];
+                    const cells = SCPGame.getSurfaceAccessCells(room, access);
+                    member.position = {layer:'surface', ...cells.outside};
+                    member.status = 'working';
+                    member.shift = 'day';
+                    member.assignmentRoomId = room.id;
+                    member.target = undefined;
+                    member.targetRoomId = undefined;
+                    member.path = [];
+                    member.pathIndex = 0;
+                    member.routeBlockedReason = undefined;
+                    Object.assign(member.needs, {hunger:0, fatigue:0, stress:0, health:100, contamination:0});
+                    for(let i=0;i<16 && access.cycle?.phase !== 'equalizing';i++) SCPGame.advanceSimulation(state,1);
+                    if(access.cycle?.phase !== 'equalizing') throw new Error('Le vrai moteur ne démarre pas le sas');
+                    const doors = SCPGame.getSurfaceAccessDoorState(state,room,access);
+                    if(doors.entryOpen || doors.exitOpen || access.passedCount) throw new Error('Interverrouillage incorrect');
+                    state.speed = 0;
+                    return state;
+                }""", baseline)
+                import_state(fixture)
+                roundtrip = saved_state()
+                cycle = roundtrip["surfaceRooms"][0]["accessPoints"][0]["cycle"]
+                original = fixture["surfaceRooms"][0]["accessPoints"][0]["cycle"]
+                assert cycle == original, "Le chargement a réinitialisé le cycle"
+                page.reload(wait_until="load")
+                page.locator("#continue-button").click()
+                loaded = saved_state()
+                assert loaded["surfaceRooms"][0]["accessPoints"][0]["cycle"] == cycle
+                select_surface_room(loaded["surfaceRooms"][0], loaded)
+                access_id = loaded["surfaceRooms"][0]["accessPoints"][0]["id"]
+                counter = page.locator(f'.surface-access-card[data-access-id="{access_id}"] .access-metrics > div').filter(has_text="Passages").locator("dd")
+                expect(counter).to_have_text("0")
+                page.locator('button[data-speed="1"]').click()
+                expect(counter).to_have_text("1", timeout=15000)
+                page.locator('button[data-speed="0"]').click()
+                complete = saved_state()
+                completed_access = complete["surfaceRooms"][0]["accessPoints"][0]
+                assert completed_access["passedCount"] == 1, "Le sas doit compter un unique franchissement"
+                assert not completed_access.get("cycle")
+                assert not completed_access["queue"]
+                room = complete["surfaceRooms"][0]
+                position = complete["staff"][0]["position"]
+                assert room["x"] <= position["x"] < room["x"] + room["width"] and room["y"] <= position["y"] < room["y"] + room["height"]
+                access_checks["cycle_resume"] = True
+                import_state(baseline)
+
+            step("reprise d’un sas en cours après import et rechargement", active_airlock_resume)
+
             def save_load():
                 page.locator('button[data-speed="0"]').click()
                 assert page.evaluate("localStorage instanceof Storage"), "Stockage navigateur natif requis"
@@ -365,6 +536,35 @@ def run():
                 page.screenshot(path=str(OUT / "mobile.png"), full_page=True)
             step("interface mobile", mobile)
 
+            def mobile_access_editor():
+                page.locator('button[data-speed="0"]').click()
+                snapshot = saved_state()
+                room = next(room for room in snapshot["surfaceRooms"] if room["id"] == access_checks["room_id"])
+                select_surface_room(room, snapshot)
+                card = page.locator(f'.surface-access-card[data-access-id="{access_checks["access_id"]}"]')
+                card.locator('[data-action="edit-access"]').click()
+                expect(page.locator("#surface-access-form")).to_be_visible()
+                assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), "Débordement horizontal de l'éditeur mobile"
+                assert page.evaluate("""() => Array.from(document.querySelectorAll('#surface-access-form input, #surface-access-form select, #surface-access-form button')).every(element => {
+                    const box=element.getBoundingClientRect();
+                    return box.width===0 || (box.left>=0 && box.right<=innerWidth+1);
+                })"""), "Commande d'accès hors écran mobile"
+                page.locator("#access-powered").uncheck()
+                page.locator("#access-air-supply").uncheck()
+                page.screenshot(path=str(OUT / "surface-access-mobile.png"), full_page=True)
+                page.locator('[data-action="save-access"]').click()
+                changed = saved_state()
+                access = next(item for item in next(r for r in changed["surfaceRooms"] if r["id"] == room["id"])["accessPoints"] if item["id"] == access_checks["access_id"])
+                assert not access["powered"] and not access["airSupply"], "Le formulaire mobile n'a pas appliqué l'état des réseaux"
+                select_surface_room(room, changed)
+                card.locator('[data-action="edit-access"]').click()
+                page.locator("#access-powered").check()
+                page.locator("#access-air-supply").check()
+                page.locator('[data-action="save-access"]').click()
+                access_checks["mobile_editor"] = True
+
+            step("éditeur tactile des accès et alimentation du sas", mobile_access_editor)
+
         except Exception as exc:
             if not results or results[-1]["ok"]:
                 results.append({"step": "exécution navigateur", "ok": False, "error": str(exc)})
@@ -387,6 +587,7 @@ finally:
         "steps": results,
         "browser_messages": errors,
         "placement": placement,
+        "surface_access": access_checks,
         "storage": "native persistent Chromium profile",
     }
     (OUT / "smoke-report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

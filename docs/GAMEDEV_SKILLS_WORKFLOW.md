@@ -47,8 +47,8 @@ and [save-systems](https://github.com/gamedev-skills/awesome-gamedev-agent-skill
 
 ### Verification commands and evidence
 
-`npm ci && npm test` compiles with the locked TypeScript toolchain, executes both
-`tests/core.test.mjs` and `tests/navigation.test.mjs`, and checks the build.
+`npm ci && npm test` compiles with the locked TypeScript toolchain, executes all
+`tests/*.test.mjs`, and checks the build.
 `python -m pip install playwright==1.56.0` and
 `python -m playwright install --with-deps chromium` prepare the browser test;
 then run `python tests/smoke.py` against the compiled game.
@@ -65,11 +65,28 @@ claiming success.
 
 ### Scope still open
 
-Room entry/exit remains a footprint-based convention. A placed door/airlock
-editor, clearance-aware passages and full underground itineraries are separate
-work. The existing abstract underground transfer is preserved. These changes do
-not establish that the planned Operations release is complete, and do not
-replace testing against authentic historical release archives or physical devices.
+The door/airlock editor and clearance-aware surface passages are now implemented.
+Full underground itineraries, freely drawn rooms and autonomous public/cargo/SCP
+traffic remain separate work. The existing abstract underground transfer is
+preserved. This tranche does not establish that the planned Operations release
+is complete, and does not replace testing against authentic historical release
+archives or physical devices.
 
 
 Recorded execution evidence: [routing/save/mobile QA](qa/2026-10-29/ROUTING_SAVE_MOBILE.md).
+
+## Applied continuation: real surface accesses
+
+- Door thresholds are grid edges. Route planning and actual movement use the same
+  permission rules: clearance, traffic profile, direction and operational state.
+- Airlocks admit a single occupant from a bounded FIFO. Their persisted phases
+  never permit both leaves open, freeze on power/air failure and resume safely.
+  Manual evacuation returns to the source side and counts no passage.
+- Admission, expiry, cancellation, changed needs, death, dismissal and loading
+  preserve reservation ownership. Paid construction/refunds are atomic.
+- The UI exposes physical wall placement, rules, power/air availability, queue,
+  occupant and failures. Default room entrances are explicit and configurable.
+- Browser checks cover editor actions, native save persistence, an active-cycle
+  import/reload/resume and the mobile editor in addition to earlier scenarios.
+- CI produces `scp-operations-package` only after a passing browser run. The ZIP
+  includes the tested dist, cumulative source, screenshots and SHA-256 metadata.

@@ -15,6 +15,7 @@
     "src/types.ts",
     "src/data.ts",
     "src/utils.ts",
+    "src/access.ts",
     "src/state.ts",
     "src/simulation.ts",
     "src/renderers.ts",
@@ -22,3 +23,4 @@
     "src/main.ts"
   ]
 }
+

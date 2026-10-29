@@ -297,6 +297,7 @@ namespace SCPGame {
     }
 
     [...state.surfaceRooms].sort((a, b) => a.type === "corridor" ? -1 : b.type === "corridor" ? 1 : 0).forEach((room) => drawSurfaceRoom(ctx, runtime, room, metrics));
+    state.surfaceRooms.forEach((room) => drawSurfaceAccesses(ctx, runtime, room, metrics));
     drawSurfaceStaff(ctx, runtime, metrics);
 
     if (runtime.hoveredCell) {
@@ -312,8 +313,9 @@ namespace SCPGame {
       ctx.strokeRect(metrics.originX + hover.x * metrics.cell, metrics.originY + hover.y * metrics.cell, w * metrics.cell, h * metrics.cell);
     }
 
-    drawCanvasTitle(ctx, "COMPLEXE DE SURFACE", "Gestion opérationnelle, files d'attente, salles, besoins et flux humains", width);
-    const queues = state.surfaceRooms.reduce((sum, room) => sum + room.queue.length, 0) + state.workItems.length;
+    drawCanvasTitle(ctx, "COMPLEXE DE SURFACE", "Accès contrôlés, sas, files et personnel", width);
+    const queues = state.surfaceRooms.reduce((sum, room) => sum + room.queue.length
+      + getSurfaceAccesses(state, room).reduce((waiting, access) => waiting + access.queue.length, 0), 0) + state.workItems.length;
     drawLegend(ctx, width, height, [
       ["Personnel", state.staff.filter((member) => member.status !== "dead").length, "#9ab7cf"],
       ["Files", queues, queues > 12 ? "#e36e68" : "#d5bd6a"],
@@ -367,12 +369,108 @@ namespace SCPGame {
     }
   }
 
+  function drawSurfaceAccesses(ctx: CanvasRenderingContext2D, runtime: RuntimeState, room: SurfaceRoom, metrics: { cell: number; originX: number; originY: number }): void {
+    if (room.type === "corridor") return;
+    const state = runtime.state;
+    const selected = state.selectedType === "surface-room" && state.selectedId === room.id;
+    getSurfaceAccesses(state, room).forEach((access, index) => {
+      const cells = getSurfaceAccessCells(room, access);
+      const centerX = metrics.originX + ((cells.inside.x + cells.outside.x) / 2 + 0.5) * metrics.cell;
+      const centerY = metrics.originY + ((cells.inside.y + cells.outside.y) / 2 + 0.5) * metrics.cell;
+      const halfWidth = metrics.cell * 0.29;
+      const depth = metrics.cell * 0.17;
+      const angle = access.side === "north" ? 0 : access.side === "east" ? Math.PI / 2 : access.side === "south" ? Math.PI : -Math.PI / 2;
+      const doorState = getSurfaceAccessDoorState(state, room, access);
+      const failure = access.kind === "airlock" && (!access.powered || !access.airSupply || state.resources.power <= 1 || Boolean(state.flags["surface-blackout"]));
+      const color = !access.enabled || failure ? "#ef8585" : access.cycle ? "#8dc9ef" : access.kind === "airlock" ? "#e5c878" : "#83e2bb";
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.rotate(angle);
+      ctx.fillStyle = "#0b1418";
+      ctx.fillRect(-halfWidth - 2, -depth - 2, halfWidth * 2 + 4, depth * 2 + 4);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = selected ? 2.4 : 1.8;
+      if (access.kind === "airlock") {
+        ctx.strokeRect(-halfWidth, -depth, halfWidth * 2, depth * 2);
+        const enteringFromOutside = !access.cycle || access.cycle.from.x === cells.outside.x && access.cycle.from.y === cells.outside.y;
+        const outsideOpen = enteringFromOutside ? doorState.entryOpen : doorState.exitOpen;
+        const insideOpen = enteringFromOutside ? doorState.exitOpen : doorState.entryOpen;
+        ctx.fillStyle = "#0b1418";
+        ctx.fillRect(-halfWidth + 1, -depth - 2, halfWidth * 2 - 2, 4);
+        ctx.fillRect(-halfWidth + 1, depth - 2, halfWidth * 2 - 2, 4);
+        for (const [leafY, open] of [[-depth, outsideOpen], [depth, insideOpen]] as Array<[number, boolean]>) {
+          ctx.beginPath();
+          if (open) {
+            ctx.moveTo(-halfWidth, leafY);
+            ctx.lineTo(-halfWidth * 0.7, leafY);
+            ctx.moveTo(halfWidth * 0.7, leafY);
+            ctx.lineTo(halfWidth, leafY);
+          } else {
+            ctx.moveTo(-halfWidth, leafY);
+            ctx.lineTo(halfWidth, leafY);
+          }
+          ctx.stroke();
+        }
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(-halfWidth, 0);
+        ctx.lineTo(doorState.entryOpen ? -halfWidth : halfWidth, doorState.entryOpen ? depth * 1.5 : 0);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(halfWidth, -depth * 0.7);
+        ctx.lineTo(halfWidth, depth * 0.7);
+        ctx.stroke();
+      }
+      if (!access.enabled || failure) {
+        ctx.beginPath();
+        ctx.moveTo(-3, -3);
+        ctx.lineTo(3, 3);
+        ctx.moveTo(3, -3);
+        ctx.lineTo(-3, 3);
+        ctx.stroke();
+      }
+      ctx.restore();
+      if (selected) {
+        const inward = { x: cells.inside.x - cells.outside.x, y: cells.inside.y - cells.outside.y };
+        const x = centerX + inward.x * metrics.cell * 0.48;
+        const y = centerY + inward.y * metrics.cell * 0.48;
+        ctx.save();
+        ctx.fillStyle = "#0b161b";
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(x, y, Math.max(6, metrics.cell * 0.19), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = color;
+        ctx.font = `700 ${Math.max(8, Math.min(10, metrics.cell * 0.3))}px system-ui`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(String(index + 1), x, y);
+        ctx.restore();
+      }
+    });
+  }
+
   function drawSurfaceStaff(ctx: CanvasRenderingContext2D, runtime: RuntimeState, metrics: { cell: number; originX: number; originY: number }): void {
     const state = runtime.state;
+    const gateOccupants = new Map<string, Point>();
+    const waitingStaff = new Map<string, { point: Point; index: number }>();
+    for (const room of state.surfaceRooms) {
+      for (const access of getSurfaceAccesses(state, room)) {
+        const { inside, outside } = getSurfaceAccessCells(room, access);
+        if (access.cycle) gateOccupants.set(access.cycle.staffId, { x: (inside.x + outside.x) / 2 + 0.5, y: (inside.y + outside.y) / 2 + 0.5 });
+        access.queue.forEach((request, index) => waitingStaff.set(request.staffId, { point: request.from, index }));
+      }
+    }
     state.staff.filter((member) => member.status !== "dead" && member.position.layer === "surface").forEach((member, index) => {
-      const x = metrics.originX + (member.position.x + 0.15 + (index % 3) * 0.08) * metrics.cell;
-      const y = metrics.originY + (member.position.y + 0.2 + (index % 2) * 0.1) * metrics.cell;
-      const radius = clamp(metrics.cell * 0.14, 3, 6);
+      const chamber = gateOccupants.get(member.id);
+      const waiting = waitingStaff.get(member.id);
+      const staffX = chamber?.x ?? (waiting ? waiting.point.x + 0.15 + (waiting.index % 4) * 0.23 : member.position.x + 0.5 + ((index % 3) - 1) * 0.08);
+      const staffY = chamber?.y ?? (waiting ? waiting.point.y + 0.15 + Math.floor(waiting.index / 4) * 0.23 : member.position.y + 0.5 + ((index % 2) - 0.5) * 0.12);
+      const x = metrics.originX + staffX * metrics.cell;
+      const y = metrics.originY + staffY * metrics.cell;
+      const radius = chamber || waiting ? clamp(metrics.cell * 0.075, 1.5, 3) : clamp(metrics.cell * 0.14, 3, 6);
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, Math.PI * 2);
       ctx.fillStyle = roleColor(member.role);

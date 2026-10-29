@@ -8,6 +8,8 @@ Livré : simulation complète 2.5D, 12 SCP, campagne, bac à sable, personnel, r
 
 ## 1.1 — Operations
 
+Tranche appliquée le 29 octobre 2026 sur la base 1.0.0 : éditeur des portes/sas de surface, habilitations et sens de passage, file FIFO et cycle interverrouillé, gestion des pannes et migration des sauvegardes. Les flux simulés concernent les employés ; les trajets souterrains physiques et les visiteurs/convois autonomes restent ouverts. La version complète 1.1 n'est pas déclarée livrée.
+
 - dessin de salles par glisser-déposer et redimensionnement ;
 - portes, sas et sens de circulation ;
 - plans de travail par équipe ;
@@ -83,3 +85,4 @@ Campagnes alternatives séparées : Voile brisé, division antimémétique, fin 
 ## Multijoueur envisagé
 
 Coopération à deux ou quatre rôles : direction, science, sécurité et logistique. Le serveur reste autoritaire, les décisions critiques peuvent exiger plusieurs validations, et la partie doit rester jouable en solo.
+

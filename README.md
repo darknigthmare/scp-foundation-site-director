@@ -1,6 +1,6 @@
 # SCP Foundation: Site Director — Deep Protocol
 
-**Version 1.0.0 — build jouable hors ligne**  
+**Base 1.0.0 — build jouable hors ligne, tranche Operations : accès de surface**  
 City-builder régional, gestion opérationnelle du complexe de surface, confinement vertical souterrain et commandement tactique de crise.
 
 ![Gestion du complexe de surface](tests/surface.png)
@@ -32,7 +32,23 @@ Le build contient notamment :
 
 La représentation est une **3D stylisée en 2.5D/isométrique par Canvas** : région en perspective, surface en plan de gestion et souterrain en coupe latérale. L’architecture est prête pour une future couche WebGL réellement volumétrique sans devoir réécrire la simulation.
 
+## Accès de surface — tranche Operations
+
+Les salles de surface disposent maintenant de portes et de sas placés sur leurs murs. Le panneau **Portes et sas** permet de choisir l'emplacement, l'habilitation minimale, les flux autorisés et le sens de circulation. Le personnel emprunte réellement les passages autorisés ; un refus d'accès arrête son trajet et apparaît dans sa fiche.
+
+Les sas traitent une personne à la fois, dans l'ordre d'arrivée, avec admission, égalisation et sortie. Une panne d'électricité ou d'air ferme les deux portes et suspend le cycle. L'évacuation manuelle replace l'occupant du côté d'origine et verrouille le passage, sans compter de traversée. La file, le cycle et le compteur sont sauvegardés.
+
+Les sauvegardes antérieures reçoivent des portes compatibles sans remplacer leurs salles ni leur personnel. Les réglages d'accès s'appliquent à chaque passage : sécuriser une salle exige de configurer tous ses accès.
+
+Cette tranche conserve la version de base 1.0.0. Le dessin libre des salles, les itinéraires souterrains physiques, les flux autonomes de public/fret/SCP et les autres systèmes de la version Operations complète restent dans la feuille de route.
+
 ## Lancement rapide
+
+### Archive avec le build fourni
+
+Le paquet cumulatif contient le code, un dossier `dist/` jouable, le rapport navigateur, les captures et des empreintes SHA-256. Avec Node.js 18 ou plus récent, lancer `npm start` depuis le dossier extrait, puis ouvrir `http://127.0.0.1:4173`. La recompilation n'est nécessaire que pour modifier les sources.
+
+Le workflow GitHub Actions produit l'artefact **scp-operations-package** après la réussite des tests. `release/BUILD_INFO.json` identifie le commit et le bundle ; `release/FILES_SHA256SUMS.txt` décrit les fichiers de l'archive. Le `SHA256SUMS.txt` historique à la racine conserve son rôle de provenance de l'archive initiale.
 
 ### Windows
 
@@ -114,7 +130,7 @@ npm run check
 npm test
 ```
 
-`npm test` reconstruit le bundle TypeScript, exécute les 12 tests métier Node et contrôle la structure publiable, les icônes PWA, la licence et l'attribution. Les validations navigateur, mobile, PWA installée et HTTP sont documentées séparément dans le rapport QA.
+`npm test` reconstruit le bundle TypeScript, exécute tous les tests métier de `tests/*.test.mjs` et contrôle la structure publiable, les icônes PWA, la licence et l'attribution. Les scénarios couvrent aussi les règles d'accès, les files et cycles des sas, les pannes et la validation des sauvegardes.
 
 Test navigateur complet facultatif, si Python et Playwright sont disponibles :
 
@@ -122,7 +138,7 @@ Test navigateur complet facultatif, si Python et Playwright sont disponibles :
 python tests/smoke.py
 ```
 
-Le rapport du dernier passage est dans `tests/smoke-report.json`. Les captures de validation sont conservées dans `tests/`.
+Le rapport du passage courant et les captures sont écrits dans `test-results/smoke/`, puis téléversés par la CI. Le navigateur utilise un serveur HTTP et le stockage natif, avec reprise après rechargement, fermeture complète et perte du réseau. Les fichiers historiques dans `tests/` restent des preuves datées.
 
 ## Structure du dépôt
 
@@ -132,6 +148,7 @@ Le rapport du dernier passage est dans `tests/smoke-report.json`. Les captures d
 │   ├── types.ts          # modèle de données
 │   ├── data.ts           # catalogue de contenu
 │   ├── utils.ts          # fonctions partagées
+│   ├── access.ts         # passages, profils et cycles des sas
 │   ├── state.ts          # création, sauvegarde et actions
 │   ├── simulation.ts     # économie, agents, SCP et crises
 │   ├── renderers.ts      # vues Canvas multi-couches
@@ -176,3 +193,4 @@ Cette version est une simulation de gestion complète et jouable, pensée comme 
 ## Licence et attribution
 
 Le projet dérive de contenus de l’univers SCP Foundation. Voir `LICENSE.md` et `ATTRIBUTION.md` avant toute redistribution ou modification. Aucun visuel, son ou fichier média du wiki SCP n’est intégré au build : l’interface, les symboles et les rendus sont générés localement par le projet.
+

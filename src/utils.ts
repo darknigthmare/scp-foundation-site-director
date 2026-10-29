@@ -157,7 +157,7 @@ namespace SCPGame {
     return entries[entries.length - 1];
   }
 
-  export function getManhattanPath(start: Point, target: Point, width: number, height: number, blocked?: Set<string>): Point[] {
+  export function getManhattanPath(start: Point, target: Point, width: number, height: number, blocked?: Set<string>, canStep?: (from: Point, to: Point) => boolean): Point[] {
     // Callers choose which room cells are traversable. This grid helper never
     // overrides an obstacle, including one at the start or destination.
     const validCell = (point: Point): boolean => Number.isInteger(point.x) && Number.isInteger(point.y)
@@ -186,6 +186,7 @@ namespace SCPGame {
         const key = `${next.x},${next.y}`;
         if (next.x < 0 || next.y < 0 || next.x >= width || next.y >= height) continue;
         if (blocked?.has(key)) continue;
+        if (canStep && !canStep(current, next)) continue;
         if (cameFrom.has(key)) continue;
         cameFrom.set(key, currentKey);
         queue.push(next);

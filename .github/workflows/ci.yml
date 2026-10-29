@@ -33,6 +33,15 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Browser smoke and persistent save round-trip
         run: python tests/smoke.py
+      - name: Generate cumulative playable package
+        run: python scripts/package_release.py
+      - name: Upload source, playable build and SHA-256
+        uses: actions/upload-artifact@v4
+        with:
+          name: scp-operations-package
+          path: test-results/package/
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload browser evidence
         if: always()
         uses: actions/upload-artifact@v4

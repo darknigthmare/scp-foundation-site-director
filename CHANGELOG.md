@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-10-29 — Tranche Operations : accès de surface, base 1.0.0
+
+### Accès et simulation
+
+- Portes et sas placés sur les limites des salles, avec emplacement, habilitation, flux et sens de circulation.
+- Itinéraires du personnel contraints par les accès réels, refus expliqué et recalcul après changement des conditions.
+- Sas à une personne, file FIFO bornée, cycle admission/égalisation/sortie et compteur de passages terminés.
+- Fermeture des deux portes et suspension du cycle lors des pannes électriques, d'air ou du verrouillage ; reprise après rétablissement.
+- Évacuation manuelle du côté d'origine, sans traversée comptée, et protection contre la démolition d'un sas occupé.
+- Paiement atomique, réglages gratuits et remboursement fondé sur le coût réellement payé.
+
+### Sauvegardes, interface et distribution
+
+- Migration des anciennes salles vers des entrées utilisables, conservation des identifiants et validation des files/cycles enregistrés.
+- Éditeur accessible avec aperçu du mur, état des passages, occupant et échéance des demandes ; commandes sur mobile.
+- Marqueurs des portes et des vantaux sur le plan, personnel centré dans les cases et représentation des files.
+- Tests des accès, des pannes et de la reprise d'un sas en cours, en complément des tests existants.
+- Cache PWA r7 ; génération CI d'un ZIP cumulatif avec sources, build, preuves navigateur et SHA-256.
+
+Les salles redimensionnables, les trajets physiques souterrains et les flux autonomes de visiteurs/fret/SCP restent à développer. Cette tranche ne remplace pas une version plus récente éventuellement conservée hors de ce dépôt.
+
+
 ## 1.0.0 — 2026-08-28
 
 ### Jeu
@@ -32,3 +54,4 @@
 - Validation structurelle et smoke test Chromium.
 - Correction d’un conflit de propagation qui annulait la sélection Canvas lors d’un clic.
 - Configuration Vercel et lanceurs locaux Windows/macOS/Linux.
+
