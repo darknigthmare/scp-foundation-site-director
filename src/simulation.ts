@@ -161,7 +161,7 @@ namespace SCPGame {
       // Keep the agent in place; do not award work at an unreachable destination.
       member.target = undefined;
       member.targetRoomId = undefined;
-      member.status = "moving";
+      if (!["injured", "quarantined"].includes(member.status)) member.status = "moving";
       return;
     }
     if (!["injured", "quarantined", "eating", "resting"].includes(member.status)) member.status = "moving";
