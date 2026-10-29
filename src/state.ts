@@ -926,6 +926,18 @@ namespace SCPGame {
     if (!candidate || typeof candidate !== "object") return undefined;
     const raw = candidate as Partial<GameState>;
     if (typeof raw.version !== "string") return undefined;
+    // A newer build may contain fields and semantics this runtime cannot safely interpret.
+    const parseVersion = (value: string): number[] | undefined => {
+      if (!/^\d+\.\d+\.\d+$/.test(value)) return undefined;
+      return value.split(".").map(Number);
+    };
+    const incomingVersion = parseVersion(raw.version);
+    const supportedVersion = parseVersion(GAME_VERSION);
+    if (!incomingVersion || !supportedVersion) return undefined;
+    for (let index = 0; index < 3; index += 1) {
+      if (incomingVersion[index] > supportedVersion[index]) return undefined;
+      if (incomingVersion[index] < supportedVersion[index]) break;
+    }
     const mode = raw.mode === "sandbox" ? "sandbox" : "campaign";
     const difficulty = ["story", "standard", "director", "keter"].includes(String(raw.settings?.difficulty)) ? raw.settings!.difficulty : "standard";
     const seed = Number.isFinite(raw.seed) ? Number(raw.seed) : Date.now();
