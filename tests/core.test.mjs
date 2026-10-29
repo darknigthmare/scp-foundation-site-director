@@ -272,3 +272,17 @@ test("la navigation contourne les cases bloquées et refuse une destination isol
   const sealed = new Set(["1,0", "0,1"]);
   assert.equal(game.getManhattanPath({ x: 0, y: 0 }, { x: 2, y: 2 }, 3, 3, sealed).length, 0);
 });
+
+test("un personnel en quarantaine conserve son statut même si le trajet est impossible", () => {
+  const game = loadGameNamespace();
+  const state = game.createNewGame("campaign", "standard", 880);
+  const member = state.staff.find(entry => entry.role === "guard");
+  assert.ok(member);
+  member.shift = "day";
+  member.needs.contamination = 90;
+  member.status = "working";
+  member.position = { layer: "surface", x: 0, y: 0 };
+  state.speed = 1;
+  game.advanceSimulation(state, 2);
+  assert.equal(member.status, "quarantined");
+});
