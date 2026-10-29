@@ -265,7 +265,8 @@ namespace SCPGame {
 
       if (member.path.length > member.pathIndex && member.position.layer === "surface") {
         const target = member.path[member.pathIndex];
-        const speed = state.settings.reducedMotion ? 0.35 : 0.55;
+        // Accessibility preferences affect rendering only, never simulation outcomes.
+        const speed = 0.55;
         const dx = target.x - member.position.x;
         const dy = target.y - member.position.y;
         const distance = Math.hypot(dx, dy);
