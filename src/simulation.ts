@@ -158,7 +158,10 @@ namespace SCPGame {
     member.path = getManhattanPath(start, goal, state.surfaceWidth, state.surfaceHeight, blocked);
     member.pathIndex = 0;
     if (member.path.length === 0 && (start.x !== goal.x || start.y !== goal.y)) {
-      member.status = "working";
+      // Keep the agent in place; do not award work at an unreachable destination.
+      member.target = undefined;
+      member.targetRoomId = undefined;
+      member.status = "moving";
       return;
     }
     if (!["injured", "quarantined", "eating", "resting"].includes(member.status)) member.status = "moving";
@@ -290,7 +293,10 @@ namespace SCPGame {
           member.position.x += dx / distance * speed;
           member.position.y += dy / distance * speed;
         }
-      } else if (desiredRoom && member.position.layer === "surface") {
+      } else if (desiredRoom && member.position.layer === "surface"
+        && member.targetRoomId === desiredRoom.id
+        && Math.hypot(member.position.x - (desiredRoom.x + desiredRoom.width / 2),
+                      member.position.y - (desiredRoom.y + desiredRoom.height / 2)) <= 1) {
         if (member.status === "injured" || member.status === "quarantined") {
           member.needs.stress = clamp(member.needs.stress - 0.03, 0, 100);
         } else if (getSurfaceDefinition(desiredRoom.type).services.includes("food")) {
