@@ -143,6 +143,7 @@ namespace SCPGame {
     member.target = { layer: "surface", x: center.x, y: center.y };
     member.targetRoomId = room.id;
     const start = { x: Math.round(member.position.x), y: Math.round(member.position.y) };
+    // Route to an accessible boundary cell rather than crossing an entire room.
     const goal = { x: Math.round(center.x), y: Math.round(center.y) };
     const blocked = new Set<string>();
     for (const occupied of state.surfaceRooms) {
@@ -155,6 +156,12 @@ namespace SCPGame {
     }
     blocked.delete(`${start.x},${start.y}`);
     blocked.delete(`${goal.x},${goal.y}`);
+    // A corridor may intersect room footprints; those corridor cells remain traversable.
+    for (const corridor of state.surfaceRooms.filter(candidate => candidate.type === "corridor")) {
+      for (let x = corridor.x; x < corridor.x + corridor.width; x += 1) {
+        for (let y = corridor.y; y < corridor.y + corridor.height; y += 1) blocked.delete(`${x},${y}`);
+      }
+    }
     member.path = getManhattanPath(start, goal, state.surfaceWidth, state.surfaceHeight, blocked);
     member.pathIndex = 0;
     if (member.path.length === 0 && (start.x !== goal.x || start.y !== goal.y)) {
