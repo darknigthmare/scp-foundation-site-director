@@ -196,3 +196,44 @@ test("une vérification ciblée neutralise une compromission interne", () => {
   assert.equal(member.compromised, false);
   assert.ok(state.reputation.command > command);
 });
+
+test("une sauvegarde provenant d'une version future est rejetée sans modifier la partie", () => {
+  const game = loadGameNamespace();
+  const current = game.createNewGame("campaign", "standard", 999);
+  const future = JSON.parse(JSON.stringify(current));
+  future.version = "999.0.0";
+  assert.equal(game.importSave(JSON.stringify(future)), undefined);
+  assert.equal(current.seed, 999);
+  assert.equal(current.version, game.GAME_VERSION);
+});
+
+test("une version de sauvegarde mal formée est refusée", () => {
+  const game = loadGameNamespace();
+  assert.equal(game.importSave(JSON.stringify({ version: "not-a-version" })), undefined);
+});
+
+test("la réduction des animations ne change pas les déplacements simulés", () => {
+  const game = loadGameNamespace();
+  const normal = game.createNewGame("campaign", "standard", 555);
+  const reduced = game.createNewGame("campaign", "standard", 555);
+  normal.settings.reducedMotion = false;
+  reduced.settings.reducedMotion = true;
+  for (const state of [normal, reduced]) {
+    state.staff = state.staff.slice(0, 1);
+    const member = state.staff[0];
+    member.shift = "day";
+    member.position = { layer: "surface", x: 1, y: 1 };
+    member.targetRoomId = undefined;
+    member.assignmentRoomId = state.surfaceRooms.find(room => room.type === "medical").id;
+    member.path = [];
+    member.pathIndex = 0;
+    state.speed = 1;
+    state.flags["last-random-event"] = 999999;
+  }
+  game.advanceSimulation(normal, 10);
+  game.advanceSimulation(reduced, 10);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(normal.staff[0].position)),
+    JSON.parse(JSON.stringify(reduced.staff[0].position))
+  );
+});
