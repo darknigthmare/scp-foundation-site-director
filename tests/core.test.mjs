@@ -210,6 +210,8 @@ test("une sauvegarde provenant d'une version future est rejetée sans modifier l
 test("une version de sauvegarde mal formée est refusée", () => {
   const game = loadGameNamespace();
   assert.equal(game.importSave(JSON.stringify({ version: "not-a-version" })), undefined);
+  assert.equal(game.importSave(JSON.stringify({ version: "0." + "9".repeat(400) + ".0" })), undefined);
+  assert.equal(game.importSave(JSON.stringify({ version: "0.9007199254740992.0" })), undefined);
 });
 
 test("la réduction des animations ne change pas les déplacements simulés", () => {
@@ -250,11 +252,11 @@ test("un agent ne reçoit pas les bénéfices d'une salle inaccessible", () => {
   member.targetRoomId = undefined;
   member.path = [];
   member.pathIndex = 0;
-  // The only food destination is unreachable because every cell is occupied.
+  // A full-height wall separates the start from food without covering either.
   state.surfaceRooms = [
     canteen,
-    { ...state.surfaceRooms[0], id: "blocker", type: "medical", x: 0, y: 0,
-      width: state.surfaceWidth, height: state.surfaceHeight, queue: [], staffAssigned: [] }
+    { ...state.surfaceRooms[0], id: "blocker", type: "medical", x: 1, y: 0,
+      width: 1, height: state.surfaceHeight, queue: [], staffAssigned: [] }
   ];
   const before = member.needs.hunger;
   state.speed = 1;
@@ -286,3 +288,146 @@ test("un personnel en quarantaine conserve son statut même si le trajet est imp
   game.advanceSimulation(state, 2);
   assert.equal(member.status, "quarantined");
 });
+
+test("les données imbriquées malformées sont refusées sans régénérer les collections", () => {
+  const storage = new Map();
+  const game = loadGameNamespace(storage);
+  const original = game.createNewGame("campaign", "standard", 901);
+  const snapshot = JSON.stringify(original);
+  storage.set(game.SAVE_KEY, snapshot);
+  const cases = [
+    ["personnel incomplet", (state) => { state.staff = [{}]; }],
+    ["membre nul dans une équipe valide", (state) => { state.staff.push(null); }],
+    ["besoins manquants", (state) => { delete state.staff[0].needs; }],
+    ["compétences nulles", (state) => { state.staff[0].skills = null; }],
+    ["position absente", (state) => { delete state.staff[0].position; }],
+    ["trajet mal formé", (state) => { state.staff[0].path = [{}]; }],
+    ["file non tabulaire", (state) => { state.surfaceRooms[0].queue = {}; }],
+    ["élément de file incomplet", (state) => { state.surfaceRooms[0].queue = [{ id: "broken" }]; }],
+    ["améliorations mal formées", (state) => { state.surfaceRooms[0].upgrades = "broken"; }],
+    ["caméra nulle", (state) => { state.camera.surface = null; }],
+    ["type de bâtiment inconnu", (state) => { state.regionFacilities[0].type = "unknown"; }],
+    ["zone de crise incomplète", (state) => { state.crisis.zones = [{ id: "broken" }]; }],
+    ["objectifs non tabulaires", (state) => { state.campaign[0].objectives = {}; }],
+    ["ressource textuelle", (state) => { state.resources.power = "broken"; }],
+    ["indicateur imbriqué", (state) => { state.flags["broken"] = {}; }]
+  ];
+  for (const [name, corrupt] of cases) {
+    const candidate = JSON.parse(snapshot);
+    corrupt(candidate);
+    assert.equal(game.importSave(JSON.stringify(candidate)), undefined, name);
+    assert.equal(storage.get(game.SAVE_KEY), snapshot, name + ": la sauvegarde existante reste intacte");
+    assert.equal(JSON.stringify(original), snapshot, name + ": la partie active reste intacte");
+  }
+});
+
+test("une ancienne sauvegarde conserve ses objets et complète ses champs optionnels", () => {
+  const game = loadGameNamespace();
+  const previous = game.createNewGame("campaign", "standard", 902);
+  previous.version = "0.9.0";
+  previous.resources.funds = 4321;
+  previous.elapsedMinutes = 120;
+  previous.camera = { surface: { zoom: 1.2 } };
+  previous.settings = { difficulty: "standard" };
+  previous.staff.forEach((member) => {
+    delete member.path;
+    delete member.pathIndex;
+    delete member.shift;
+    delete member.loyalty;
+    delete member.compromised;
+    delete member.taskProgress;
+  });
+  previous.surfaceRooms.forEach((room) => {
+    delete room.queue;
+    delete room.staffAssigned;
+    delete room.upgrades;
+    delete room.enabled;
+    delete room.powerPriority;
+  });
+  previous.regionFacilities.forEach((facility) => {
+    delete facility.enabled;
+    delete facility.staffed;
+  });
+  previous.undergroundRooms.forEach((room) => { delete room.powerPriority; });
+  previous.procedures.forEach((procedure) => {
+    delete procedure.notes;
+    delete procedure.opticalMonitoring;
+  });
+  previous.scps.forEach((scp) => {
+    delete scp.activeEffect;
+    delete scp.transferred;
+  });
+  const staffIds = Array.from(previous.staff, (member) => member.id);
+  const roomIds = Array.from(previous.surfaceRooms, (room) => room.id);
+  const imported = game.importSave(JSON.stringify(previous));
+  assert.ok(imported);
+  assert.deepEqual(Array.from(imported.staff, (member) => member.id), staffIds);
+  assert.deepEqual(Array.from(imported.surfaceRooms, (room) => room.id), roomIds);
+  assert.equal(imported.resources.funds, 4321);
+  assert.equal(imported.elapsedMinutes, 120);
+  assert.equal(imported.camera.surface.zoom, 1.2);
+  assert.equal(imported.camera.surface.offsetX, 0);
+  assert.equal(imported.camera.surface.offsetY, 0);
+  assert.equal(imported.camera.region.zoom, 1);
+  assert.equal(imported.staff[0].loyalty, 70);
+  assert.ok(imported.surfaceRooms.every((room) => room.enabled && Number.isFinite(room.powerPriority)));
+  assert.ok(imported.regionFacilities.every((facility) => facility.enabled && typeof facility.staffed === "boolean"));
+  assert.ok(imported.undergroundRooms.every((room) => Number.isFinite(room.powerPriority)));
+  assert.ok(imported.procedures.every((procedure) => typeof procedure.notes === "string" && typeof procedure.opticalMonitoring === "boolean"));
+  assert.ok(imported.scps.every((scp) => typeof scp.activeEffect === "string" && typeof scp.transferred === "boolean"));
+  imported.speed = 1;
+  assert.doesNotThrow(() => game.advanceSimulation(imported, 30));
+  assert.ok(Object.values(imported.resources).every(Number.isFinite));
+});
+
+test("un emplacement récent corrompu laisse charger l'autre sauvegarde intacte", () => {
+  const storage = new Map();
+  const game = loadGameNamespace(storage);
+  const invalid = game.createNewGame("campaign", "standard", 903);
+  const valid = game.createNewGame("sandbox", "director", 904);
+  invalid.savedAt = 20;
+  invalid.staff[0].needs = null;
+  valid.savedAt = 10;
+  const manual = JSON.stringify(invalid);
+  const automatic = JSON.stringify(valid);
+  storage.set(game.SAVE_KEY, manual);
+  storage.set(game.AUTOSAVE_KEY, automatic);
+  const loaded = game.loadLatestGame();
+  assert.ok(loaded);
+  assert.equal(loaded.seed, 904);
+  assert.equal(storage.get(game.SAVE_KEY), manual);
+  assert.equal(storage.get(game.AUTOSAVE_KEY), automatic);
+  storage.set(game.AUTOSAVE_KEY, manual);
+  assert.equal(game.loadLatestGame(), undefined);
+});
+
+test("les dimensions invalides et nombres non finis sont refusés avant reprise", () => {
+  const game = loadGameNamespace();
+  const original = game.createNewGame("campaign", "standard", 905);
+  const snapshot = JSON.stringify(original);
+  for (const width of [0, -1, 1.5, 257, 1_000_000_000]) {
+    const candidate = JSON.parse(snapshot);
+    candidate.surfaceWidth = width;
+    assert.equal(game.importSave(JSON.stringify(candidate)), undefined, "largeur " + width);
+  }
+  for (const mutate of [
+    (state) => { state.undergroundLevels = 65; },
+    (state) => { state.camera.surface.zoom = 0; },
+    (state) => { state.camera.surface.offsetX = "broken"; },
+    (state) => { state.staff[0].needs.health = null; },
+    (state) => { state.staff[0].position.x = -1; },
+    (state) => { state.staff[0].position.x = state.surfaceWidth; },
+    (state) => { state.staff[0].path = [{ x: state.surfaceWidth, y: 0 }]; }
+  ]) {
+    const candidate = JSON.parse(snapshot);
+    mutate(candidate);
+    assert.equal(game.importSave(JSON.stringify(candidate)), undefined);
+  }
+  const overflowingNumber = snapshot.replace('"power":140', '"power":1e400');
+  assert.notEqual(overflowingNumber, snapshot);
+  assert.equal(game.importSave(overflowingNumber), undefined);
+  // Changing dimensions cannot silently inherit a default layout outside the map.
+  assert.equal(game.importSave(JSON.stringify({ version: "0.9.0", surfaceWidth: 1 })), undefined);
+});
+
+

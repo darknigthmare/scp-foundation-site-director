@@ -922,6 +922,155 @@ namespace SCPGame {
     logHistory(state, "Mandat Deep Protocol prolongé en exploitation libre.");
   }
 
+  // Missing legacy fields can be migrated. Supplied malformed fields must never
+  // replace a collection with a fresh roster or enter the running simulation.
+  function hasValidLoadedFields(candidate: unknown, defaults: GameState): boolean {
+    type Check = (value: unknown) => boolean;
+    const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+    const text: Check = (value) => typeof value === "string";
+    const id: Check = (value) => typeof value === "string" && value.length > 0;
+    const boolean: Check = (value) => typeof value === "boolean";
+    const finite: Check = (value) => typeof value === "number" && Number.isFinite(value);
+    const integer = (min: number, max = Number.MAX_SAFE_INTEGER): Check => (value) => finite(value) && Number.isInteger(value) && Number(value) >= min && Number(value) <= max;
+    const oneOf = (values: readonly unknown[]): Check => (value) => values.includes(value);
+    const array = (check: Check): Check => (value) => Array.isArray(value) && value.length <= 10_000 && value.every(check);
+    const shape = (value: unknown, checks: Record<string, Check>, required: string[] = []): boolean =>
+      record(value) && required.every((key) => value[key] !== undefined)
+      && Object.entries(checks).every(([key, check]) => value[key] === undefined || check(value[key]));
+    const numericRecord = (value: unknown, required: string[] = []): boolean =>
+      record(value) && required.every((key) => finite(value[key])) && Object.values(value).every(finite);
+    const primitive: Check = (value) => text(value) || boolean(value) || finite(value);
+    const stringArray = array(text);
+    const views = ["region", "surface", "underground", "command", "management"];
+    const layers = ["region", "surface", "underground"];
+    const roles = Object.keys(ROLE_LABELS);
+    const statuses = ["working", "moving", "resting", "eating", "queued", "training", "injured", "quarantined", "off-duty", "dead"];
+    const gridKeys = ["regionWidth", "regionHeight", "surfaceWidth", "surfaceHeight", "undergroundWidth", "undergroundLevels"];
+    if (!record(candidate) || !gridKeys.every((key) => candidate[key] === undefined || integer(1, key === "undergroundLevels" ? 64 : 256)(candidate[key]))) return false;
+    const size = (key: keyof GameState): number => Number(candidate[key] ?? defaults[key]);
+    const point: Check = (value) => shape(value, { x: finite, y: finite }, ["x", "y"]) && record(value)
+      && Number(value.x) >= 0 && Number(value.x) < size("surfaceWidth") && Number(value.y) >= 0 && Number(value.y) < size("surfaceHeight");
+    const layerPoint: Check = (value) => {
+      if (!shape(value, { x: finite, y: finite, layer: oneOf(layers), level: integer(0, size("undergroundLevels") - 1) }, ["x", "y", "layer"]) || !record(value)) return false;
+      const width = size(value.layer === "surface" ? "surfaceWidth" : value.layer === "region" ? "regionWidth" : "undergroundWidth");
+      const height = size(value.layer === "surface" ? "surfaceHeight" : value.layer === "region" ? "regionHeight" : "undergroundLevels");
+      return Number(value.x) >= 0 && Number(value.x) < width && Number(value.y) >= 0 && Number(value.y) < height;
+    };
+    const workItem: Check = (value) => shape(value, {
+      id, kind: oneOf(["access", "patient", "delivery", "anomaly", "repair", "research", "training", "inspection"]),
+      severity: finite, progress: finite, createdAt: finite, expiresAt: finite, source: text,
+      metadata: (entry) => record(entry) && Object.values(entry).every(primitive)
+    }, ["id", "kind", "severity", "progress", "createdAt", "expiresAt"]);
+    const roomArrays = { staffAssigned: stringArray, upgrades: stringArray };
+    const surfaceRoom: Check = (value) => {
+      if (!shape(value, {
+        id, type: oneOf(SURFACE_ROOM_DEFINITIONS.map((entry) => entry.type)),
+        x: integer(0), y: integer(0), width: integer(1, 256), height: integer(1, 256),
+        level: integer(1), condition: finite, cleanliness: finite, enabled: boolean,
+        powerPriority: finite, name: text, ...roomArrays, queue: array(workItem)
+      }, ["id", "type", "x", "y", "width", "height", "level", "condition", "cleanliness"]) || !record(value)) return false;
+      return Number(value.x) + Number(value.width) <= size("surfaceWidth") && Number(value.y) + Number(value.height) <= size("surfaceHeight");
+    };
+    const undergroundRoom: Check = (value) => {
+      if (!shape(value, {
+        id, type: oneOf(UNDERGROUND_ROOM_DEFINITIONS.map((entry) => entry.type)),
+        x: integer(0), level: integer(0, size("undergroundLevels") - 1), width: integer(1, 256),
+        condition: finite, enabled: boolean, sealed: boolean, powerPriority: finite, name: text, scpId: text, ...roomArrays
+      }, ["id", "type", "x", "level", "width", "condition"]) || !record(value)) return false;
+      return Number(value.x) + Number(value.width) <= size("undergroundWidth");
+    };
+    const facility: Check = (value) => {
+      if (!shape(value, {
+        id, type: oneOf(REGION_FACILITY_DEFINITIONS.map((entry) => entry.type)),
+        x: integer(0), y: integer(0), width: integer(1, 256), height: integer(1, 256),
+        level: integer(1), condition: finite, staffed: boolean, enabled: boolean
+      }, ["id", "type", "x", "y", "width", "height", "level", "condition"]) || !record(value)) return false;
+      return Number(value.x) + Number(value.width) <= size("regionWidth") && Number(value.y) + Number(value.height) <= size("regionHeight");
+    };
+    const member: Check = (value) => shape(value, {
+      id, name: text, role: oneOf(roles), clearance: integer(0, 5), salary: finite,
+      skills: (entry) => numericRecord(entry, Object.keys(defaults.staff[0].skills)),
+      needs: (entry) => numericRecord(entry, Object.keys(defaults.staff[0].needs)),
+      traits: stringArray, status: oneOf(statuses), position: layerPoint, target: layerPoint,
+      targetRoomId: text, assignmentRoomId: text, path: array(point), pathIndex: integer(0),
+      shift: oneOf(["day", "night"]), experience: finite, loyalty: finite, compromised: boolean, taskProgress: finite
+    }, ["id", "name", "role", "clearance", "salary", "skills", "needs", "traits", "status", "position", "experience"]);
+    const scpIds = SCP_DEFINITIONS.map((entry) => entry.id);
+    const scp: Check = (value) => shape(value, {
+      id, definitionId: oneOf(scpIds), contained: boolean, discovered: boolean, roomId: text,
+      researchProgress: finite, knowledge: finite, breachRisk: finite, mood: finite, health: finite,
+      activeEffect: text, procedureId: text, daysContained: finite, incidents: finite, transferred: boolean
+    }, ["id", "definitionId", "contained", "discovered", "researchProgress", "knowledge", "breachRisk", "mood", "health", "daysContained", "incidents"]);
+    const procedure: Check = (value) => shape(value, {
+      id, scpId: oneOf(scpIds), version: integer(1), observationLevel: finite, assignedStaff: finite,
+      maintenanceFrequency: finite, backupPower: boolean, analogBackup: boolean, biometricMonitoring: boolean,
+      opticalMonitoring: boolean, automatedLockdown: boolean, humaneCare: boolean, restrictedTesting: boolean,
+      isolatedNetwork: boolean, redundantVentilation: boolean, trainingRequired: finite, notes: text,
+      compliance: finite, complexity: finite
+    }, ["id", "scpId", "version", "observationLevel", "assignedStaff", "maintenanceFrequency", "trainingRequired", "compliance", "complexity"]);
+    const severity = oneOf(["info", "minor", "major", "critical"]);
+    const effect: Check = (value) => shape(value, {
+      type: oneOf(["resource", "reputation", "queue", "crisis", "staff", "scp", "flag", "log"]),
+      key: text, amount: finite, value: primitive, target: text
+    }, ["type"]);
+    const eventChoice: Check = (value) => shape(value, {
+      id, label: text, description: text, cost: (entry) => numericRecord(entry),
+      effects: array(effect), requirement: text
+    }, ["id", "label", "description", "effects"]);
+    const event: Check = (value) => shape(value, {
+      id, templateId: text, title: text, body: text, severity, choices: array(eventChoice),
+      createdAt: finite, resolved: boolean, blocking: boolean
+    }, ["id", "templateId", "title", "body", "severity", "choices", "createdAt", "resolved", "blocking"]);
+    const zone: Check = (value) => shape(value, {
+      id, name: text, layer: oneOf(layers), level: integer(0, size("undergroundLevels") - 1),
+      security: finite, population: finite, casualties: finite, contamination: finite,
+      power: finite, sealed: boolean, evacuated: boolean, threat: finite
+    }, ["id", "name", "layer", "security", "population", "casualties", "contamination", "power", "sealed", "evacuated", "threat"]);
+    const order: Check = (value) => shape(value, {
+      id, type: oneOf(["lockdown", "evacuate", "deploy-security", "deploy-mtf", "restore-power", "decontaminate", "medical-response", "seal-ventilation", "amnestic-response"]),
+      zoneId: text, progress: finite, duration: finite, assigned: finite,
+      status: oneOf(["queued", "active", "completed", "failed"])
+    }, ["id", "type", "zoneId", "progress", "duration", "assigned", "status"]);
+    const objective: Check = (value) => shape(value, { id, progress: finite, complete: boolean }, ["id"]);
+    const chapter: Check = (value) => shape(value, { id, complete: boolean, objectives: array(objective) }, ["id"]);
+    const notification: Check = (value) => shape(value, {
+      id, time: finite, title: text, message: text, severity, read: boolean
+    }, ["id", "time", "title", "message", "severity", "read"]);
+    const camera: Check = (value) => shape(value, {
+      zoom: (entry) => finite(entry) && Number(entry) > 0 && Number(entry) <= 100,
+      offsetX: finite, offsetY: finite
+    });
+    // Validate inherited geometry too when a partial save changes map dimensions.
+    if (!array(facility)(candidate.regionFacilities === undefined ? defaults.regionFacilities : candidate.regionFacilities)
+      || !array(surfaceRoom)(candidate.surfaceRooms === undefined ? defaults.surfaceRooms : candidate.surfaceRooms)
+      || !array(undergroundRoom)(candidate.undergroundRooms === undefined ? defaults.undergroundRooms : candidate.undergroundRooms)
+      || !array(member)(candidate.staff === undefined ? defaults.staff : candidate.staff)) return false;
+    return shape(candidate, {
+      mode: oneOf(["campaign", "sandbox"]), view: oneOf(views), speed: oneOf([0, 1, 2, 4]), previousSpeed: oneOf([0, 1, 2, 4]),
+      seed: finite, savedAt: finite, day: integer(1), minuteOfDay: integer(0, 1439), elapsedMinutes: integer(0),
+      currentChapter: integer(0, defaults.campaign.length - 1), lastAutosave: finite, gameOver: boolean, victory: boolean,
+      settings: (value) => shape(value, {
+        difficulty: oneOf(["story", "standard", "director", "keter"]), reducedMotion: boolean, highContrast: boolean,
+        audio: boolean, autoPauseCritical: boolean, tutorial: boolean, language: oneOf(["fr"])
+      }),
+      resources: (value) => numericRecord(value), reputation: (value) => numericRecord(value),
+      regionFacilities: array(facility), surfaceRooms: array(surfaceRoom), undergroundRooms: array(undergroundRoom),
+      staff: array(member), workItems: array(workItem), scps: array(scp), procedures: array(procedure),
+      researchNodes: array((value) => shape(value, { id, completed: boolean }, ["id"])), events: array(event),
+      campaign: array(chapter), notifications: array(notification), history: stringArray,
+      currentEventId: text, selectedId: text,
+      selectedType: oneOf(["facility", "surface-room", "underground-room", "staff", "scp", "zone"]),
+      flags: (value) => record(value) && Object.values(value).every(primitive),
+      camera: (value) => shape(value, Object.fromEntries(views.map((view) => [view, camera]))),
+      crisis: (value) => shape(value, {
+        active: boolean, type: text, title: text, description: text, severity: finite, elapsed: finite,
+        siteIntegrity: finite, veilExposure: finite, threatProgress: finite, sourceScpId: text,
+        zones: array(zone), orders: array(order), log: stringArray, resolved: oneOf(["success", "failure"])
+      })
+    });
+  }
+
+
   function normalizeLoadedState(candidate: unknown): GameState | undefined {
     if (!candidate || typeof candidate !== "object") return undefined;
     const raw = candidate as Partial<GameState>;
@@ -929,7 +1078,8 @@ namespace SCPGame {
     // A newer build may contain fields and semantics this runtime cannot safely interpret.
     const parseVersion = (value: string): number[] | undefined => {
       if (!/^\d+\.\d+\.\d+$/.test(value)) return undefined;
-      return value.split(".").map(Number);
+      const parts = value.split(".").map(Number);
+      return parts.every(Number.isSafeInteger) ? parts : undefined;
     };
     const incomingVersion = parseVersion(raw.version);
     const supportedVersion = parseVersion(GAME_VERSION);
@@ -942,6 +1092,7 @@ namespace SCPGame {
     const difficulty = ["story", "standard", "director", "keter"].includes(String(raw.settings?.difficulty)) ? raw.settings!.difficulty : "standard";
     const seed = Number.isFinite(raw.seed) ? Number(raw.seed) : Date.now();
     const defaults = createNewGame(mode, difficulty, seed);
+    if (!hasValidLoadedFields(candidate, defaults)) return undefined;
     const objectValue = <T extends object>(value: unknown, fallback: T): T => value && typeof value === "object" && !Array.isArray(value) ? { ...fallback, ...(value as Partial<T>) } : fallback;
     const arrayValue = <T>(value: unknown, fallback: T[]): T[] => Array.isArray(value) && value.every((entry) => entry && typeof entry === "object") ? value as T[] : fallback;
     const state: GameState = {
@@ -967,7 +1118,13 @@ namespace SCPGame {
       notifications: arrayValue<Notification>(raw.notifications, defaults.notifications),
       history: Array.isArray(raw.history) ? raw.history.filter((entry): entry is string => typeof entry === "string").slice(-500) : defaults.history,
       flags: objectValue(raw.flags, defaults.flags),
-      camera: objectValue(raw.camera, defaults.camera),
+      camera: {
+        region: objectValue(raw.camera?.region, defaults.camera.region),
+        surface: objectValue(raw.camera?.surface, defaults.camera.surface),
+        underground: objectValue(raw.camera?.underground, defaults.camera.underground),
+        command: objectValue(raw.camera?.command, defaults.camera.command),
+        management: objectValue(raw.camera?.management, defaults.camera.management)
+      },
       buildSelection: undefined
     };
     state.savedAt = typeof state.savedAt === "number" && Number.isFinite(state.savedAt) ? state.savedAt : Date.now() - Math.max(0, 1_000_000 - (state.elapsedMinutes || 0));
@@ -980,8 +1137,25 @@ namespace SCPGame {
     });
     state.flags["load-schema-version"] = LOAD_SCHEMA_VERSION;
     if (state.currentEventId && !state.events?.some((event) => event.id === state.currentEventId && !event.resolved)) state.currentEventId = undefined;
-    state.surfaceRooms.forEach((room) => { room.staffAssigned = room.staffAssigned ?? []; room.queue = room.queue ?? []; room.upgrades = room.upgrades ?? []; });
-    state.undergroundRooms.forEach((room) => { room.staffAssigned = room.staffAssigned ?? []; room.upgrades = room.upgrades ?? []; room.enabled = room.enabled !== false; room.sealed = Boolean(room.sealed); });
+    state.regionFacilities.forEach((facility) => {
+      facility.enabled = facility.enabled !== false;
+      facility.staffed = facility.staffed ?? (facility.type !== "watchtower" && facility.type !== "checkpoint");
+    });
+    state.surfaceRooms.forEach((room) => {
+      room.staffAssigned = room.staffAssigned ?? [];
+      room.queue = room.queue ?? [];
+      room.upgrades = room.upgrades ?? [];
+      room.enabled = room.enabled !== false;
+      room.powerPriority = room.powerPriority ?? (["elevator", "medical", "command-center"].includes(room.type) ? 3 : 2);
+    });
+    state.undergroundRooms.forEach((room) => {
+      room.staffAssigned = room.staffAssigned ?? [];
+      room.upgrades = room.upgrades ?? [];
+      room.enabled = room.enabled !== false;
+      room.sealed = Boolean(room.sealed);
+      const tags = getUndergroundDefinition(room.type).tags;
+      room.powerPriority = room.powerPriority ?? (tags.includes("keter") || tags.includes("bio") ? 3 : 2);
+    });
     state.staff.forEach((member, index) => {
       member.path = member.path ?? [];
       member.pathIndex = member.pathIndex ?? 0;
@@ -991,10 +1165,13 @@ namespace SCPGame {
       member.taskProgress = clamp(Number(member.taskProgress ?? 0), 0, 100);
     });
     state.scps = state.scps.filter((scp) => SCP_DEFINITIONS.some((definition) => definition.id === scp.definitionId));
+    state.procedures = state.procedures.map((procedure) => ({ ...createDefaultProcedure(procedure.scpId), ...procedure }));
     defaults.scps.forEach((defaultScp) => {
       if (!state.scps.some((scp) => scp.definitionId === defaultScp.definitionId)) state.scps.push(defaultScp);
     });
     state.scps.forEach((scp) => {
+      scp.activeEffect = scp.activeEffect ?? (scp.contained ? "Confinement à réévaluer" : "En attente de transfert");
+      scp.transferred = scp.transferred ?? scp.contained;
       let procedure = state.procedures.find((entry) => entry.id === scp.procedureId || entry.scpId === scp.definitionId);
       if (!procedure) {
         procedure = createDefaultProcedure(scp.definitionId);
@@ -1007,7 +1184,7 @@ namespace SCPGame {
     });
     state.researchNodes = defaults.researchNodes.map((defaultNode) => {
       const loaded = state.researchNodes.find((node) => node.id === defaultNode.id);
-      return loaded ? { ...defaultNode, completed: Boolean(loaded.completed) } : defaultNode;
+      return loaded ? { ...defaultNode, completed: loaded.completed ?? defaultNode.completed } : defaultNode;
     });
     state.campaign = defaults.campaign.map((defaultChapter) => {
       const loaded = state.campaign.find((chapter) => chapter.id === defaultChapter.id);
@@ -1028,3 +1205,4 @@ namespace SCPGame {
     return state;
   }
 }
+

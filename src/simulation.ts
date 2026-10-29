@@ -132,58 +132,156 @@ namespace SCPGame {
     return { x: room.x + room.width / 2, y: room.y + room.height / 2 };
   }
 
-  function setStaffTarget(state: GameState, member: StaffMember, room?: SurfaceRoom): void {
-    if (!room) {
-      member.target = undefined;
-      member.targetRoomId = undefined;
-      member.path = [];
-      return;
-    }
-    const center = getRoomCenter(room);
-    member.target = { layer: "surface", x: center.x, y: center.y };
-    member.targetRoomId = room.id;
-    const start = { x: Math.round(member.position.x), y: Math.round(member.position.y) };
-    // Route to an accessible boundary cell rather than crossing an entire room.
-    const goal = { x: Math.round(center.x), y: Math.round(center.y) };
+  interface StaffRouteCache {
+    state: GameState;
+    topology: string;
+    intent: string;
+    roomId?: string;
+    position: Point;
+    path: Point[];
+    pathIndex: number;
+    checkedAt: number;
+  }
+
+  // Routes are derived from the current map. A loaded save has no cache entry,
+  // so its serialized waypoints are rebuilt before the first movement.
+  const staffRouteCache = new WeakMap<StaffMember, StaffRouteCache>();
+  const ROUTE_RETRY_MINUTES = 10;
+
+  function surfaceTopologySignature(state: GameState): string {
+    return JSON.stringify([state.surfaceWidth, state.surfaceHeight, state.surfaceRooms.map((room) =>
+      [room.id, room.type, room.x, room.y, room.width, room.height, room.enabled])]);
+  }
+
+  function roomArrivalCell(room: SurfaceRoom): Point {
+    return { x: Math.floor(room.x + room.width / 2), y: Math.floor(room.y + room.height / 2) };
+  }
+
+  export function planSurfaceRoute(state: GameState, position: LayerPoint, room: SurfaceRoom): Point[] | undefined {
+    if (!Number.isInteger(state.surfaceWidth) || !Number.isInteger(state.surfaceHeight)
+      || state.surfaceWidth <= 0 || state.surfaceHeight <= 0
+      || !room.enabled || !state.surfaceRooms.includes(room) || position.layer !== "surface"
+      || !Number.isFinite(position.x) || !Number.isFinite(position.y)
+      || position.x < 0 || position.y < 0 || position.x >= state.surfaceWidth || position.y >= state.surfaceHeight) return undefined;
+    if (state.surfaceRooms.some((candidate) => ![candidate.x, candidate.y, candidate.width, candidate.height].every(Number.isInteger)
+      || candidate.x < 0 || candidate.y < 0 || candidate.width <= 0 || candidate.height <= 0
+      || candidate.x + candidate.width > state.surfaceWidth || candidate.y + candidate.height > state.surfaceHeight)) return undefined;
+
+    const start = { x: Math.floor(position.x), y: Math.floor(position.y) };
+    const goal = roomArrivalCell(room);
+    // Until doors are modelled, staff may leave their current room and enter
+    // their destination. Every other room footprint remains an obstacle.
+    const origin = state.surfaceRooms.find((candidate) => candidate.type !== "corridor"
+      && pointInRect(position, candidate.x, candidate.y, candidate.width, candidate.height));
     const blocked = new Set<string>();
+    const closed = new Set<string>();
     for (const occupied of state.surfaceRooms) {
-      if (occupied.type === "corridor" || occupied.id === room.id) continue;
+      if (occupied.id === origin?.id || occupied.id === room.id || occupied.type === "corridor" && occupied.enabled) continue;
       for (let x = occupied.x; x < occupied.x + occupied.width; x += 1) {
         for (let y = occupied.y; y < occupied.y + occupied.height; y += 1) {
           blocked.add(`${x},${y}`);
+          if (!occupied.enabled) closed.add(`${x},${y}`);
         }
       }
     }
-    blocked.delete(`${start.x},${start.y}`);
-    blocked.delete(`${goal.x},${goal.y}`);
-    // A corridor may intersect room footprints; those corridor cells remain traversable.
-    for (const corridor of state.surfaceRooms.filter(candidate => candidate.type === "corridor")) {
+    for (const corridor of state.surfaceRooms.filter((candidate) => candidate.type === "corridor" && candidate.enabled)) {
       for (let x = corridor.x; x < corridor.x + corridor.width; x += 1) {
-        for (let y = corridor.y; y < corridor.y + corridor.height; y += 1) blocked.delete(`${x},${y}`);
+        for (let y = corridor.y; y < corridor.y + corridor.height; y += 1) {
+          const key = `${x},${y}`;
+          if (!closed.has(key)) blocked.delete(key);
+        }
       }
     }
-    member.path = getManhattanPath(start, goal, state.surfaceWidth, state.surfaceHeight, blocked);
+    if (blocked.has(`${start.x},${start.y}`) || blocked.has(`${goal.x},${goal.y}`)) return undefined;
+    const path = getManhattanPath(start, goal, state.surfaceWidth, state.surfaceHeight, blocked);
+    if (path.length === 0 && (start.x !== goal.x || start.y !== goal.y)) return undefined;
+
+    // Replanning halfway through a step must not connect a fractional position
+    // diagonally to a new waypoint. Align inside the current cell on each axis.
+    const prefix: Point[] = [];
+    if (position.x !== start.x) prefix.push({ x: start.x, y: position.y });
+    if (position.y !== start.y) prefix.push(start);
+    return prefix.concat(path);
+  }
+
+  function clearStaffRoute(member: StaffMember): void {
+    member.target = undefined;
+    member.targetRoomId = undefined;
+    member.path = [];
     member.pathIndex = 0;
-    if (member.path.length === 0 && (start.x !== goal.x || start.y !== goal.y)) {
-      // Keep the agent in place; do not award work at an unreachable destination.
-      member.target = undefined;
-      member.targetRoomId = undefined;
-      if (!["injured", "quarantined"].includes(member.status)) member.status = "moving";
-      return;
+    staffRouteCache.delete(member);
+  }
+
+  function rememberStaffRoute(state: GameState, member: StaffMember, topology: string, intent: string): void {
+    staffRouteCache.set(member, {
+      state, topology, intent, roomId: member.targetRoomId,
+      position: { x: member.position.x, y: member.position.y },
+      path: member.path, pathIndex: member.pathIndex, checkedAt: state.elapsedMinutes
+    });
+  }
+
+  function chooseStaffDestination(state: GameState, member: StaffMember, topology: string,
+    service?: string, assignedRoom?: SurfaceRoom): SurfaceRoom | undefined {
+    const intent = assignedRoom ? `room:${assignedRoom.id}` : service ? `service:${service}` : "";
+    if (!intent || member.position.layer !== "surface") {
+      clearStaffRoute(member);
+      return undefined;
     }
-    if (!["injured", "quarantined", "eating", "resting"].includes(member.status)) member.status = "moving";
+    const matches = (room: SurfaceRoom): boolean => room.enabled
+      && (assignedRoom ? room.id === assignedRoom.id : getSurfaceDefinition(room.type).services.includes(service as string));
+    const cache = staffRouteCache.get(member);
+    if (cache?.state === state && cache.topology === topology && cache.intent === intent
+      && cache.path === member.path && cache.pathIndex === member.pathIndex
+      && cache.position.x === member.position.x && cache.position.y === member.position.y) {
+      if (cache.roomId && cache.roomId === member.targetRoomId) {
+        const cachedRoom = state.surfaceRooms.find((candidate) => candidate.id === cache.roomId && matches(candidate));
+        if (cachedRoom) return cachedRoom;
+      } else if (!cache.roomId && !member.targetRoomId && state.elapsedMinutes >= cache.checkedAt
+        && state.elapsedMinutes - cache.checkedAt < ROUTE_RETRY_MINUTES) {
+        return undefined;
+      }
+    }
+    const candidates = state.surfaceRooms.filter(matches).sort((a, b) => a.queue.length - b.queue.length);
+    // Keep a usable destination while a task is in progress. Its own patient
+    // entry must not make staff alternate between two hospitals every minute.
+    const current = candidates.find((candidate) => candidate.id === member.targetRoomId);
+    const ordered = current ? [current, ...candidates.filter((candidate) => candidate !== current)] : candidates;
+    for (const candidate of ordered) {
+      const path = planSurfaceRoute(state, member.position, candidate);
+      if (path === undefined) continue;
+      member.target = { layer: "surface", ...getRoomCenter(candidate) };
+      member.targetRoomId = candidate.id;
+      member.path = path;
+      member.pathIndex = 0;
+      rememberStaffRoute(state, member, topology, intent);
+      return candidate;
+    }
+    clearStaffRoute(member);
+    rememberStaffRoute(state, member, topology, intent);
+    return undefined;
+  }
+
+  function staffHasArrived(member: StaffMember, room: SurfaceRoom): boolean {
+    const arrival = roomArrivalCell(room);
+    return room.enabled && member.position.layer === "surface" && member.targetRoomId === room.id
+      && member.pathIndex >= member.path.length
+      && member.position.x === arrival.x && member.position.y === arrival.y;
   }
 
   function queueStaffTreatment(state: GameState, member: StaffMember, room: SurfaceRoom, source: string, severity: number): void {
-    const alreadyQueued = room.queue.some((item) => item.kind === "patient" && item.metadata?.staffId === member.id)
-      || state.workItems.some((item) => item.kind === "patient" && item.metadata?.staffId === member.id);
-    if (alreadyQueued) return;
-    const item = createWorkItem("patient", severity, state.elapsedMinutes, source);
-    item.metadata = { staffId: member.id };
+    const isPatient = (item: WorkItem): boolean => item.kind === "patient" && item.metadata?.staffId === member.id;
+    const existing = state.surfaceRooms.flatMap((candidate) => candidate.queue).find(isPatient) || state.workItems.find(isPatient);
+    if (existing && room.queue.includes(existing)) return;
+    // A changed route moves the existing request, preserving its deadline.
+    state.surfaceRooms.forEach((candidate) => candidate.queue = candidate.queue.filter((item) => !isPatient(item)));
+    state.workItems = state.workItems.filter((item) => !isPatient(item));
+    const item = existing ?? createWorkItem("patient", severity, state.elapsedMinutes, source);
+    item.metadata = { ...item.metadata, staffId: member.id };
     room.queue.push(item);
   }
 
   function updateStaff(state: GameState): void {
+    const topology = surfaceTopologySignature(state);
     const moraleBonus = state.scps.reduce((sum, scp) => {
       if (!scp.contained) return sum;
       return sum + getSCPDefinition(scp.definitionId).moraleEffect;
@@ -225,67 +323,58 @@ namespace SCPGame {
       member.needs.stress = clamp(member.needs.stress + (state.crisis.active ? 0.07 : 0.006) * difficulty - moraleBonus * 0.0005, 0, 100);
       member.needs.morale = clamp(member.needs.morale + (state.reputation.personnel - 55) * 0.0004 - member.needs.stress * 0.0003, 0, 100);
 
-      if (member.needs.contamination > 65 && member.status !== "quarantined") {
+      if (member.needs.contamination > 65) {
         member.status = "quarantined";
-        const quarantine = findSurfaceRoomByService(state, "quarantine");
-        if (quarantine) {
-          queueStaffTreatment(state, member, quarantine, "Contamination du personnel", 8);
-          setStaffTarget(state, member, quarantine);
-        }
-        return;
-      }
-
-      if (member.needs.health < 45 && member.status !== "injured") {
+      } else if (member.needs.health < 45 && member.status !== "quarantined") {
         member.status = "injured";
-        const medical = findSurfaceRoomByService(state, "medical");
-        if (medical) {
-          queueStaffTreatment(state, member, medical, "Blessure du personnel", 6);
-          setStaffTarget(state, member, medical);
-        }
-        return;
       }
 
-      let desiredRoom: SurfaceRoom | undefined;
+      let service: string | undefined;
+      let assignedRoom: SurfaceRoom | undefined;
+      let activity: "working" | "eating" | "resting" = "working";
       if (member.status === "quarantined") {
-        desiredRoom = findSurfaceRoomByService(state, "quarantine");
-        if (desiredRoom) queueStaffTreatment(state, member, desiredRoom, "Suivi de quarantaine", 8);
+        service = "quarantine";
       } else if (member.status === "injured") {
-        desiredRoom = findSurfaceRoomByService(state, "medical");
-        if (desiredRoom) queueStaffTreatment(state, member, desiredRoom, "Soins du personnel", 6);
+        service = "medical";
       } else if (member.needs.hunger > 72) {
-        desiredRoom = findSurfaceRoomByService(state, "food");
-        member.status = "eating";
+        service = "food";
+        activity = "eating";
       } else if (member.needs.fatigue > 75 || member.needs.stress > 78) {
-        desiredRoom = findSurfaceRoomByService(state, "rest");
-        member.status = "resting";
+        service = "rest";
+        activity = "resting";
       } else if (member.assignmentRoomId) {
         const surfaceRoom = state.surfaceRooms.find((room) => room.id === member.assignmentRoomId);
-        const undergroundRoom = state.undergroundRooms.find((room) => room.id === member.assignmentRoomId);
+        const undergroundRoom = state.undergroundRooms.find((room) => room.id === member.assignmentRoomId && room.enabled);
         if (surfaceRoom) {
-          desiredRoom = surfaceRoom;
-          if (member.status !== "moving") member.status = "working";
+          assignedRoom = surfaceRoom;
         } else if (undergroundRoom) {
+          clearStaffRoute(member);
           member.position = { layer: "underground", x: undergroundRoom.x + undergroundRoom.width / 2, y: undergroundRoom.level, level: undergroundRoom.level };
-          member.target = undefined;
           member.status = "working";
           applyWorkFatigue(member, undergroundRoom.scpId ? 1.4 : 1);
           return;
         }
       } else {
-        desiredRoom = findSurfaceRoomByService(state, member.role === "researcher" ? "research" : member.role === "engineer" ? "repair" : member.role === "medic" ? "medical" : member.role === "guard" || member.role === "mtf" ? "security" : member.role === "logistics" ? "logistics" : "administration");
+        service = member.role === "researcher" ? "research" : member.role === "engineer" ? "repair" : member.role === "medic" ? "medical" : member.role === "guard" || member.role === "mtf" ? "security" : member.role === "logistics" ? "logistics" : "administration";
       }
 
-      if (desiredRoom && member.targetRoomId !== desiredRoom.id && member.position.layer === "surface") {
-        setStaffTarget(state, member, desiredRoom);
-      }
-
-      if (member.position.layer === "underground" && desiredRoom) {
-        const elevator = state.surfaceRooms.find((room) => room.type === "elevator");
+      if (member.position.layer === "underground" && (service || assignedRoom?.enabled)) {
+        const elevator = state.surfaceRooms.find((room) => room.type === "elevator" && room.enabled);
         member.position = elevator ? { layer: "surface", ...getRoomCenter(elevator) } : { layer: "surface", x: 22, y: 14 };
-        setStaffTarget(state, member, desiredRoom);
+        clearStaffRoute(member);
       }
 
-      if (member.path.length > member.pathIndex && member.position.layer === "surface") {
+      const desiredRoom = chooseStaffDestination(state, member, topology, service, assignedRoom);
+      if (desiredRoom && (member.status === "injured" || member.status === "quarantined")) {
+        queueStaffTreatment(state, member, desiredRoom,
+          member.status === "quarantined" ? "Suivi de quarantaine" : "Soins du personnel",
+          member.status === "quarantined" ? 8 : 6);
+      }
+      if (member.status !== "injured" && member.status !== "quarantined") {
+        member.status = desiredRoom ? "moving" : "queued";
+      }
+
+      if (desiredRoom && member.path.length > member.pathIndex && member.position.layer === "surface") {
         const target = member.path[member.pathIndex];
         // Accessibility preferences affect rendering only, never simulation outcomes.
         const speed = 0.55;
@@ -300,17 +389,17 @@ namespace SCPGame {
           member.position.x += dx / distance * speed;
           member.position.y += dy / distance * speed;
         }
-      } else if (desiredRoom && member.position.layer === "surface"
-        && member.targetRoomId === desiredRoom.id
-        && Math.hypot(member.position.x - (desiredRoom.x + desiredRoom.width / 2),
-                      member.position.y - (desiredRoom.y + desiredRoom.height / 2)) <= 1) {
+      }
+      if (desiredRoom && staffHasArrived(member, desiredRoom)) {
         if (member.status === "injured" || member.status === "quarantined") {
           member.needs.stress = clamp(member.needs.stress - 0.03, 0, 100);
-        } else if (getSurfaceDefinition(desiredRoom.type).services.includes("food")) {
+        } else if (activity === "eating") {
+          member.status = "eating";
           member.needs.hunger = clamp(member.needs.hunger - 0.45, 0, 100);
           member.needs.morale = clamp(member.needs.morale + 0.05, 0, 100);
           if (member.needs.hunger < 25) member.status = "working";
-        } else if (getSurfaceDefinition(desiredRoom.type).services.includes("rest")) {
+        } else if (activity === "resting") {
+          member.status = "resting";
           member.needs.fatigue = clamp(member.needs.fatigue - 0.32, 0, 100);
           member.needs.stress = clamp(member.needs.stress - 0.22, 0, 100);
           if (member.needs.fatigue < 35 && member.needs.stress < 45) member.status = "working";
@@ -318,6 +407,12 @@ namespace SCPGame {
           member.status = "working";
           applyWorkFatigue(member, 1);
         }
+      }
+
+      const route = staffRouteCache.get(member);
+      if (route) {
+        route.position = { x: member.position.x, y: member.position.y };
+        route.pathIndex = member.pathIndex;
       }
 
       if (member.needs.fatigue > 92 || member.needs.stress > 94) {
@@ -379,11 +474,14 @@ namespace SCPGame {
   }
 
   function roomServiceEfficiency(state: GameState, room: SurfaceRoom): number {
+    if (!room.enabled) return 0;
     const definition = getSurfaceDefinition(room.type);
     const staff = room.staffAssigned
       .map((id) => state.staff.find((member) => member.id === id))
-      .filter((member): member is StaffMember => Boolean(member && member.status !== "dead" && member.status !== "off-duty"));
+      .filter((member): member is StaffMember => Boolean(member && member.status === "working"
+        && member.assignmentRoomId === room.id && staffHasArrived(member, room)));
     const required = Object.values(definition.requiredRoles).reduce((sum, count) => sum + (count ?? 0), 0);
+    if (required > 0 && staff.length === 0) return 0;
     const staffing = required === 0 ? 1 : clamp(staff.length / required, 0, 1.4);
     const wellness = staff.length === 0 ? (required === 0 ? 1 : 0.25) : staff.reduce((sum, member) => sum + (1 - member.needs.fatigue / 180 - member.needs.stress / 220), 0) / staff.length;
     const utility = state.resources.power > 5 && state.resources.water > 3 ? 1 : 0.55;
@@ -391,22 +489,31 @@ namespace SCPGame {
     return clamp(staffing * wellness * utility * condition * (1 + (room.level - 1) * 0.15), 0.05, 2.2);
   }
 
+  function patientIsPresent(state: GameState, room: SurfaceRoom, item: WorkItem): boolean {
+    const staffId = item.kind === "patient" ? item.metadata?.staffId : undefined;
+    if (typeof staffId !== "string") return true;
+    const patient = state.staff.find((member) => member.id === staffId);
+    return Boolean(patient && patient.status !== "dead" && staffHasArrived(patient, room));
+  }
+
   function processSurfaceQueues(state: GameState): void {
     state.surfaceRooms.forEach((room) => {
-      if (!room.enabled || room.queue.length === 0) return;
-      const definition = getSurfaceDefinition(room.type);
-      const efficiency = roomServiceEfficiency(state, room);
-      const capacity = Math.max(1, Math.floor(definition.capacity / 4));
-      room.queue.slice(0, capacity).forEach((item) => {
-        item.progress += efficiency * (12 / Math.max(1, item.severity));
-      });
-      const completed = room.queue.filter((item) => item.progress >= 100);
-      completed.forEach((item) => completeWorkItem(state, room, item));
-      room.queue = room.queue.filter((item) => item.progress < 100);
-
+      // Closing a room pauses its service, not the deadline of queued work.
       const expired = room.queue.filter((item) => state.elapsedMinutes > item.expiresAt);
       expired.forEach((item) => failWorkItem(state, room, item));
       room.queue = room.queue.filter((item) => state.elapsedMinutes <= item.expiresAt);
+      if (!room.enabled || room.queue.length === 0) return;
+      const definition = getSurfaceDefinition(room.type);
+      const efficiency = roomServiceEfficiency(state, room);
+      if (efficiency <= 0) return;
+      const capacity = Math.max(1, Math.floor(definition.capacity / 4));
+      const ready = room.queue.filter((item) => patientIsPresent(state, room, item)).slice(0, capacity);
+      ready.forEach((item) => {
+        item.progress += efficiency * (12 / Math.max(1, item.severity));
+      });
+      const completed = ready.filter((item) => item.progress >= 100);
+      completed.forEach((item) => completeWorkItem(state, room, item));
+      room.queue = room.queue.filter((item) => !completed.includes(item));
     });
 
     state.workItems = state.workItems.filter((item) => {
@@ -415,7 +522,14 @@ namespace SCPGame {
         return false;
       }
       const service = item.kind === "patient" ? "medical" : item.kind === "delivery" ? "delivery" : item.kind === "anomaly" ? "anomaly" : item.kind === "repair" ? "repair" : item.kind === "research" ? "research" : item.kind === "inspection" ? "cover" : "access";
-      const room = findSurfaceRoomByService(state, service);
+      const staffId = item.kind === "patient" ? item.metadata?.staffId : undefined;
+      const patient = typeof staffId === "string" ? state.staff.find((member) => member.id === staffId) : undefined;
+      // A staff treatment request follows the reachable destination selected by
+      // that patient. Ordinary external work keeps the queue-based allocation.
+      const room = typeof staffId === "string"
+        ? state.surfaceRooms.find((candidate) => candidate.id === patient?.targetRoomId && candidate.enabled
+          && getSurfaceDefinition(candidate.type).services.includes(patient?.status === "quarantined" ? "quarantine" : "medical"))
+        : findSurfaceRoomByService(state, service);
       if (room) {
         room.queue.push(item);
         return false;
@@ -1246,3 +1360,4 @@ namespace SCPGame {
     return hash;
   }
 }
+
