@@ -71,3 +71,5 @@ work. The existing abstract underground transfer is preserved. These changes do
 not establish that the planned Operations release is complete, and do not
 replace testing against authentic historical release archives or physical devices.
 
+
+Recorded execution evidence: [routing/save/mobile QA](qa/2026-10-29/ROUTING_SAVE_MOBILE.md).

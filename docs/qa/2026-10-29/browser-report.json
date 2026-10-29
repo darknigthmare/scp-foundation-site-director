@@ -1,0 +1,84 @@
+{
+  "source_commit": "7ab984ec0bdbcb40ec56c3226bb5ab6675c63ae1",
+  "workflow_run": "https://github.com/darknigthmare/scp-foundation-site-director/actions/runs/40919804961",
+  "build_sha256": {
+    "game.js": "1a6b09250df5db9bd50633cee60a2b3f55f6866c89874aebd58032f43e01e46c",
+    "service-worker.js": "b69ec0d68710d51c8a07853d9cb8c3cd317519a31287ccf717cefc2b775dc3d8"
+  },
+  "report": {
+    "ok": true,
+    "steps": [
+      {
+        "step": "chargement",
+        "ok": true
+      },
+      {
+        "step": "nouvelle partie",
+        "ok": true
+      },
+      {
+        "step": "construction région",
+        "ok": true
+      },
+      {
+        "step": "vue et construction surface",
+        "ok": true
+      },
+      {
+        "step": "vue et construction sous-sol",
+        "ok": true
+      },
+      {
+        "step": "transfert d’un SCP vers une cellule compatible",
+        "ok": true
+      },
+      {
+        "step": "gestion, recrutement, recherche et procédure",
+        "ok": true
+      },
+      {
+        "step": "sauvegarde et chargement",
+        "ok": true
+      },
+      {
+        "step": "reprise après rechargement HTTP",
+        "ok": true
+      },
+      {
+        "step": "reprise après fermeture complète du navigateur",
+        "ok": true
+      },
+      {
+        "step": "reprise hors ligne via le cache PWA",
+        "ok": true
+      },
+      {
+        "step": "mode crise et ordre tactique",
+        "ok": true
+      },
+      {
+        "step": "interface mobile",
+        "ok": true
+      }
+    ],
+    "browser_messages": [],
+    "placement": {
+      "region": {
+        "funds_before": "72 k",
+        "funds_after": "65.5 k",
+        "placed": true
+      },
+      "surface": {
+        "funds_before": "65.5 k",
+        "funds_after": "63.7 k",
+        "placed": true
+      },
+      "underground": {
+        "funds_before": "63.7 k",
+        "funds_after": "62.5 k",
+        "placed": true
+      }
+    },
+    "storage": "native persistent Chromium profile"
+  }
+}
