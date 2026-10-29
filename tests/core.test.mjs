@@ -237,3 +237,27 @@ test("la réduction des animations ne change pas les déplacements simulés", ()
     JSON.parse(JSON.stringify(reduced.staff[0].position))
   );
 });
+
+test("un agent ne reçoit pas les bénéfices d'une salle inaccessible", () => {
+  const game = loadGameNamespace();
+  const state = game.createNewGame("campaign", "standard", 777);
+  const member = state.staff.find(entry => entry.role === "guard");
+  const canteen = state.surfaceRooms.find(room => room.type === "canteen");
+  assert.ok(member && canteen);
+  member.shift = "day";
+  member.position = { layer: "surface", x: 0, y: 0 };
+  member.needs.hunger = 90;
+  member.targetRoomId = undefined;
+  member.path = [];
+  member.pathIndex = 0;
+  // The only food destination is unreachable because every cell is occupied.
+  state.surfaceRooms = [
+    canteen,
+    { ...state.surfaceRooms[0], id: "blocker", type: "medical", x: 0, y: 0,
+      width: state.surfaceWidth, height: state.surfaceHeight, queue: [], staffAssigned: [] }
+  ];
+  const before = member.needs.hunger;
+  state.speed = 1;
+  game.advanceSimulation(state, 1);
+  assert.ok(member.needs.hunger >= before);
+});
