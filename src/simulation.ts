@@ -142,13 +142,25 @@ namespace SCPGame {
     const center = getRoomCenter(room);
     member.target = { layer: "surface", x: center.x, y: center.y };
     member.targetRoomId = room.id;
-    member.path = getManhattanPath(
-      { x: Math.round(member.position.x), y: Math.round(member.position.y) },
-      { x: Math.round(center.x), y: Math.round(center.y) },
-      state.surfaceWidth,
-      state.surfaceHeight
-    );
+    const start = { x: Math.round(member.position.x), y: Math.round(member.position.y) };
+    const goal = { x: Math.round(center.x), y: Math.round(center.y) };
+    const blocked = new Set<string>();
+    for (const occupied of state.surfaceRooms) {
+      if (occupied.type === "corridor" || occupied.id === room.id) continue;
+      for (let x = occupied.x; x < occupied.x + occupied.width; x += 1) {
+        for (let y = occupied.y; y < occupied.y + occupied.height; y += 1) {
+          blocked.add(`${x},${y}`);
+        }
+      }
+    }
+    blocked.delete(`${start.x},${start.y}`);
+    blocked.delete(`${goal.x},${goal.y}`);
+    member.path = getManhattanPath(start, goal, state.surfaceWidth, state.surfaceHeight, blocked);
     member.pathIndex = 0;
+    if (member.path.length === 0 && (start.x !== goal.x || start.y !== goal.y)) {
+      member.status = "working";
+      return;
+    }
     if (!["injured", "quarantined", "eating", "resting"].includes(member.status)) member.status = "moving";
   }
 
