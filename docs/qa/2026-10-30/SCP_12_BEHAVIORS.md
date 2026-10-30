@@ -17,7 +17,10 @@
 ## Tests
 
 - Local : **216 tests métier réussis sur 216**, compilation TypeScript stricte et validation structurelle réussies.
-- Navigateurs : validation GitHub Actions à vérifier avant toute déclaration de réussite ; nouveau parcours SCP-131 dans `tests/smoke.py`.
+- **CI du commit fonctionnel :** [GitHub Actions #41077190018](https://github.com/darknigthmare/scp-foundation-site-director/actions/runs/41077190018) **réussie**, **216/216 tests métier**, **23/23 étapes Chromium**, **aucun message d'erreur navigateur**. Le parcours `SCP-131 : diagnostic individuel, réponse et délai de réutilisation` est passé avec sauvegarde et reprise du jeu.
+- **[Build testé](https://github.com/darknigthmare/scp-foundation-site-director/actions/runs/41077190018/artifacts/12987456840)**, **[captures et rapport Chromium](https://github.com/darknigthmare/scp-foundation-site-director/actions/runs/41077190018/artifacts/12987581839)** et **[paquet cumulatif compilé](https://github.com/darknigthmare/scp-foundation-site-director/actions/runs/41077190018/artifacts/12987591786)**.
+- L'archive intérieure `scp-builder-operations-scp-12-behaviors.zip` contient **132 entrées**, dont **131 objets validés par leur manifeste SHA-256** ; aucune erreur ZIP. SHA-256 de l'archive intérieure : `604c01623ac6974337236fb8ce94fe492f8dab5deafe8fba7c662f152f79b8a2`. SHA-256 de `dist/game.js` : `0b31ef9dfc0862b687a7b3b6a6553c309cd40fde738cc935a5bcda9765e5bf04`.
+- L'artefact publié par ce pipeline est lié à son commit de fusion temporaire `0c1480d...` ; cela **n'indique pas que la PR #2 a été fusionnée dans main**. L'actualisation ultérieure du présent rapport QA constitue un nouveau commit documentaire sans modification fonctionnelle et sera revérifiée par une nouvelle CI.
 
 ## Portée non couverte
 
