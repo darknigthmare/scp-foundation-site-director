@@ -35,6 +35,7 @@ namespace SCPGame {
 
     updateUtilityReserves(state);
     updateStaff(state);
+    updateSurfaceAccesses(state);
     updateKeterStability(state);
 
     if (state.elapsedMinutes % 10 === 0) processSurfaceQueues(state);
@@ -132,45 +133,502 @@ namespace SCPGame {
     return { x: room.x + room.width / 2, y: room.y + room.height / 2 };
   }
 
-  function setStaffTarget(state: GameState, member: StaffMember, room?: SurfaceRoom): void {
-    if (!room) {
-      member.target = undefined;
-      member.targetRoomId = undefined;
-      member.path = [];
+  const UNDERGROUND_MOVE_SPEED = 0.55;
+  const VERTICAL_TRANSFER_MINUTES = 4;
+
+  function undergroundPowerAvailable(state: GameState, shaft?: UndergroundRoom): boolean {
+    return state.resources.power > 5 && !Boolean(state.flags["surface-blackout"])
+      && (!shaft || getUndergroundUtilityStatus(state, shaft).power);
+  }
+
+  function undergroundTransitStatus(member: StaffMember): void {
+    if (!["injured", "quarantined", "dead"].includes(member.status)) member.status = "moving";
+  }
+
+  export function staffIsAtUndergroundRoom(member: StaffMember, room: UndergroundRoom): boolean {
+    const point = undergroundRoomCenter(room);
+    return member.position.layer === "underground" && (member.position.level ?? member.position.y) === room.level
+      && Math.abs(member.position.x - point.x) < 0.0001
+      && Math.abs((member.position.sectionY ?? 14) - (room.y ?? 14)) < 0.0001;
+  }
+
+  function undergroundRouteFailure(member: StaffMember): void {
+    member.routeBlockedReason = "Galerie coupée, module scellé ou habilitation insuffisante";
+    undergroundTransitStatus(member);
+    member.status = "queued";
+    member.path = [];
+    member.pathIndex = 0;
+  }
+
+  function moveUndergroundX(member: StaffMember, destinationX: number): void {
+    const delta = destinationX - member.position.x;
+    member.position.x += Math.sign(delta) * Math.min(Math.abs(delta), UNDERGROUND_MOVE_SPEED);
+    member.position.y = member.position.level ?? member.position.y;
+  }
+
+  // A transverse junction advances continuously in the third spatial axis.
+  // Save the junction IDs instead of recomputing a path from a fractional row.
+  function continueUndergroundLink(state: GameState, member: StaffMember): void {
+    const link = member.undergroundLink;
+    if (!link || member.position.layer !== "underground") return;
+    const from = state.undergroundRooms.find((room) => room.id === link.fromId);
+    const to = state.undergroundRooms.find((room) => room.id === link.toId);
+    const fromOpen = Boolean(from && canStaffEnterUndergroundRoom(from, member));
+    const toOpen = Boolean(to && canStaffEnterUndergroundRoom(to, member));
+    if (!fromOpen && !toOpen) {
+      member.routeBlockedReason = "Jonction inter-coupes isolée des deux côtés";
+      member.status = "queued";
       return;
     }
-    const center = getRoomCenter(room);
-    member.target = { layer: "surface", x: center.x, y: center.y };
-    member.targetRoomId = room.id;
-    member.path = getManhattanPath(
-      { x: Math.round(member.position.x), y: Math.round(member.position.y) },
-      { x: Math.round(center.x), y: Math.round(center.y) },
-      state.surfaceWidth,
-      state.surfaceHeight
-    );
+    const allowed = Boolean(fromOpen && toOpen && from && to && areUndergroundRoomsConnected(from, to, state));
+    // A sector closed mid-crossing sends the member back along the same
+    // junction at normal walking speed, never instantaneously through rock.
+    const endpoint = allowed || !fromOpen ? to : from;
+    if (!endpoint) {
+      member.routeBlockedReason = "Coupe adjacente indisponible";
+      member.status = "queued";
+      return;
+    }
+    const goal = undergroundRoomSectionY(state, endpoint);
+    const here = member.position.sectionY ?? getLegacyUndergroundSectionY(state);
+    const remaining = goal - here;
+    member.position.sectionY = here + Math.sign(remaining) * Math.min(Math.abs(remaining), UNDERGROUND_MOVE_SPEED);
+    member.position.x = link.crossingX;
+    member.position.y = endpoint.level;
+    undergroundTransitStatus(member);
+    member.routeBlockedReason = allowed ? undefined : "Secteur fermé : retour à la coupe précédente";
+    if (Math.abs(member.position.sectionY - goal) < 0.0001) {
+      member.position.sectionY = goal;
+      member.undergroundLink = undefined;
+    }
+  }
+
+  // Follow x/sectionY/depth edges explicitly. Horizontal corridors share a
+  // wall, transverse corridors share an x interval and vertical ones share
+  // the same shaft footprint at consecutive depths.
+  function advanceUndergroundWalk(state: GameState, member: StaffMember,
+    destination: UndergroundRoom, intentId = destination.id): boolean {
+    if (member.undergroundLink) { continueUndergroundLink(state, member); return false; }
+    const route = planUndergroundRoute(state, member.position, destination, member);
+    if (!route) { undergroundRouteFailure(member); return false; }
+    member.routeBlockedReason = undefined;
+    const origin = route[0];
+    const next = route[1] ?? origin;
+    const nextPoint = undergroundRoomPosition(state, next);
+    const originPoint = undergroundRoomPosition(state, origin);
+    const wasTarget = member.target?.layer === "underground" && member.targetRoomId === intentId
+      && member.target.x === nextPoint.x && member.target.level === next.level
+      && member.target.sectionY === nextPoint.sectionY;
+    // Explicit airlock: queue at the origin center and equalize before the
+    // physical edge traversal. Gates belong to an edge, not to an entire room.
+    const gate = origin !== next ? getUndergroundGateBetween(state, origin, next) : undefined;
+    if (gate && origin.level === next.level) {
+      if (Math.abs(member.position.x - originPoint.x) > 0.0001) {
+        member.target = originPoint;
+        member.targetRoomId = intentId;
+        moveUndergroundX(member, originPoint.x);
+        undergroundTransitStatus(member);
+        return false;
+      }
+      member.target = nextPoint;
+      member.targetRoomId = intentId;
+      if (gate.kind === "airlock") requestUndergroundGate(state, gate, member, origin, next);
+      else if (!gate.cycle) {
+        // A door also reserves the physical edge until the traveller clears
+        // its threshold. This prevents a late lock from admitting half a step.
+        gate.cycle = { staffId: member.id, fromId: origin.id,
+          toId: next.id, phase: 'crossing', remaining: 0 };
+        undergroundTransitStatus(member);
+      } else {
+        member.status = 'queued';
+        member.routeBlockedReason = 'Porte occupée — attente de franchissement';
+      }
+      return false;
+    }
+    undergroundTransitStatus(member);
+    member.path = route.slice(1).map(undergroundRoomCenter);
     member.pathIndex = 0;
-    if (!["injured", "quarantined", "eating", "resting"].includes(member.status)) member.status = "moving";
+    member.position.sectionY ??= getLegacyUndergroundSectionY(state);
+
+    if (next.level !== (member.position.level ?? member.position.y)) {
+      if (Math.abs(member.position.x - originPoint.x) > 0.0001) {
+        member.target = originPoint;
+        member.targetRoomId = intentId;
+        member.taskProgress = 0;
+        moveUndergroundX(member, originPoint.x);
+        return false;
+      }
+      if (!wasTarget) member.taskProgress = 0;
+      member.target = nextPoint;
+      member.targetRoomId = intentId;
+      if (!undergroundPowerAvailable(state, next)) {
+        member.routeBlockedReason = "Ascenseur ou puits sans circuit électrique actif";
+        return false;
+      }
+      member.taskProgress = Math.min(100, member.taskProgress + 100 / VERTICAL_TRANSFER_MINUTES);
+      if (member.taskProgress < 100) return false;
+      member.position = { ...nextPoint };
+      member.taskProgress = 0;
+      return false;
+    }
+
+    const originY = undergroundRoomSectionY(state, origin);
+    const nextY = undergroundRoomSectionY(state, next);
+    if (originY !== nextY) {
+      const left = Math.max(origin.x, next.x);
+      const right = Math.min(origin.x + origin.width, next.x + next.width);
+      // Keep the crossing inside the shared opening. The midpoint gives a
+      // deterministic portal when re-routing a staffed, saved installation.
+      const crossingX = (left + right) / 2;
+      if (Math.abs(member.position.x - crossingX) > 0.0001) {
+        member.target = { ...originPoint, x: crossingX };
+        member.targetRoomId = intentId;
+        member.taskProgress = 0;
+        moveUndergroundX(member, crossingX);
+        return false;
+      }
+      member.undergroundLink = { fromId: origin.id, toId: next.id, crossingX };
+      member.target = { ...nextPoint, x: crossingX };
+      member.targetRoomId = intentId;
+      member.taskProgress = 0;
+      continueUndergroundLink(state, member);
+      return false;
+    }
+
+    // A member already at a cell does not reset accumulated experience.
+    if (staffIsAtUndergroundRoom(member, destination)) {
+      member.target = undergroundRoomPosition(state, destination);
+      member.targetRoomId = intentId;
+      member.path = [];
+      member.pathIndex = 0;
+      member.status = "working";
+      return true;
+    }
+    member.taskProgress = 0;
+    member.target = nextPoint;
+    member.targetRoomId = intentId;
+    moveUndergroundX(member, nextPoint.x);
+    if (!staffIsAtUndergroundRoom(member, destination)) return false;
+    member.path = [];
+    member.pathIndex = 0;
+    member.status = "working";
+    return true;
+  }
+
+  function selectUndergroundEntry(state: GameState, member: StaffMember,
+    destination: UndergroundRoom): UndergroundPortal | undefined {
+    let selected: UndergroundPortal | undefined;
+    let best = Infinity;
+    for (const portal of getUndergroundPortals(state)) {
+      const below = planUndergroundRoute(state,
+        undergroundRoomPosition(state, portal.shaft), destination, member);
+      if (!below) continue;
+      const above = planSurfaceRoute(state, member.position, portal.elevator, member);
+      if (above === undefined) continue;
+      const distance = above.length + below.length * 2
+        + Math.abs(undergroundRoomCenter(destination).x - undergroundRoomCenter(portal.shaft).x) / 2
+        + Math.abs(undergroundRoomSectionY(state, destination) - undergroundRoomSectionY(state, portal.shaft)) * 3;
+      if (distance < best) { best = distance; selected = portal; }
+    }
+    return selected;
+  }
+
+  // targetRoomId stores the destination and target stores the chosen shaft.
+  // Both fields (and taskProgress) already survive save/load; no new schema.
+  function continueUndergroundDescent(state: GameState, member: StaffMember): void {
+    const destination = state.undergroundRooms.find((room) => room.id === member.targetRoomId);
+    const target = member.target;
+    if (!destination || target?.layer !== "underground") {
+      clearStaffRoute(member);
+      member.taskProgress = 0;
+      undergroundRouteFailure(member);
+      return;
+    }
+    const portal = getUndergroundPortals(state).find(({ elevator, shaft }) =>
+      Math.abs(undergroundRoomCenter(shaft).x - target.x) < 0.0001
+      && (target.sectionY ?? getLegacyUndergroundSectionY(state)) === undergroundRoomSectionY(state, shaft)
+      && pointInRect(member.position, elevator.x, elevator.y, elevator.width, elevator.height));
+    if (!portal || !planUndergroundRoute(state,
+      undergroundRoomPosition(state, portal.shaft), destination, member)) {
+      member.routeBlockedReason = "Ascenseur ou réseau profond indisponible";
+      undergroundTransitStatus(member);
+      return;
+    }
+    undergroundTransitStatus(member);
+    if (!undergroundPowerAvailable(state, portal.shaft)) {
+      member.routeBlockedReason = "Ascenseur ou puits sans circuit électrique actif";
+      return;
+    }
+    member.routeBlockedReason = undefined;
+    member.taskProgress = Math.min(100, member.taskProgress + 100 / VERTICAL_TRANSFER_MINUTES);
+    if (member.taskProgress < 100) return;
+    member.position = undergroundRoomPosition(state, portal.shaft);
+    member.taskProgress = 0;
+    clearStaffRoute(member);
+  }
+
+  function chooseUndergroundReturnPortal(state: GameState, member: StaffMember):
+    UndergroundPortal | undefined {
+    let selected: UndergroundPortal | undefined;
+    let best = Infinity;
+    for (const portal of getUndergroundPortals(state)) {
+      const route = planUndergroundRoute(state, member.position, portal.shaft, member);
+      if (!route) continue;
+      // Preserve the selected return lift through a pause or save/load.
+      const preferred = portal.elevator.id === member.targetRoomId ? -1000 : 0;
+      const score = route.length * 2
+        + Math.abs(member.position.x - undergroundRoomCenter(portal.shaft).x)
+        + Math.abs((member.position.sectionY ?? getLegacyUndergroundSectionY(state))
+          - undergroundRoomSectionY(state, portal.shaft)) * 3 + preferred;
+      if (score < best) { best = score; selected = portal; }
+    }
+    return selected;
+  }
+
+  function advanceUndergroundReturn(state: GameState, member: StaffMember): void {
+    const portal = chooseUndergroundReturnPortal(state, member);
+    if (!portal) { undergroundRouteFailure(member); return; }
+    const surfacePoint = getRoomCenter(portal.elevator);
+    if (!staffIsAtUndergroundRoom(member, portal.shaft)) {
+      advanceUndergroundWalk(state, member, portal.shaft, portal.elevator.id);
+      return;
+    }
+    const continuing = member.target?.layer === "surface" && member.targetRoomId === portal.elevator.id;
+    if (!continuing) member.taskProgress = 0;
+    member.target = { layer: "surface", ...surfacePoint };
+    member.targetRoomId = portal.elevator.id;
+    member.path = [];
+    member.pathIndex = 0;
+    undergroundTransitStatus(member);
+    if (!undergroundPowerAvailable(state, portal.shaft)) {
+      member.routeBlockedReason = "Ascenseur ou puits sans circuit électrique actif";
+      return;
+    }
+    member.routeBlockedReason = undefined;
+    member.taskProgress = Math.min(100, member.taskProgress + 100 / VERTICAL_TRANSFER_MINUTES);
+    if (member.taskProgress < 100) return;
+    member.position = { layer: "surface", ...surfacePoint };
+    member.taskProgress = 0;
+    clearStaffRoute(member);
+  }
+
+  interface StaffRouteCache {
+    state: GameState;
+    topology: string;
+    intent: string;
+    roomId?: string;
+    position: Point;
+    path: Point[];
+    pathIndex: number;
+    checkedAt: number;
+  }
+
+  // Routes are derived from the current map. A loaded save has no cache entry,
+  // so its serialized waypoints are rebuilt before the first movement.
+  const staffRouteCache = new WeakMap<StaffMember, StaffRouteCache>();
+  const ROUTE_RETRY_MINUTES = 10;
+
+  function surfaceTopologySignature(state: GameState): string {
+    return JSON.stringify([state.surfaceWidth, state.surfaceHeight, state.resources.power > 1,
+      Boolean(state.flags["surface-blackout"]), state.surfaceRooms.map((room) =>
+      [room.id, room.type, room.x, room.y, room.width, room.height, room.enabled,
+        getSurfaceAccesses(state, room).map((access) => [access.id, access.side, access.offset, access.kind,
+          access.enabled, access.minClearance, access.allowedTraffic, access.direction, access.powered, access.airSupply])])]);
+  }
+
+  function roomArrivalCell(room: SurfaceRoom): Point {
+    return { x: Math.floor(room.x + room.width / 2), y: Math.floor(room.y + room.height / 2) };
+  }
+
+  export function planSurfaceRoute(state: GameState, position: LayerPoint, room: SurfaceRoom, member?: StaffMember): Point[] | undefined {
+    if (!Number.isInteger(state.surfaceWidth) || !Number.isInteger(state.surfaceHeight)
+      || state.surfaceWidth <= 0 || state.surfaceHeight <= 0
+      || !room.enabled || !state.surfaceRooms.includes(room) || position.layer !== "surface"
+      || !Number.isFinite(position.x) || !Number.isFinite(position.y)
+      || position.x < 0 || position.y < 0 || position.x >= state.surfaceWidth || position.y >= state.surfaceHeight) return undefined;
+    if (state.surfaceRooms.some((candidate) => ![candidate.x, candidate.y, candidate.width, candidate.height].every(Number.isInteger)
+      || candidate.x < 0 || candidate.y < 0 || candidate.width <= 0 || candidate.height <= 0
+      || candidate.x + candidate.width > state.surfaceWidth || candidate.y + candidate.height > state.surfaceHeight)) return undefined;
+
+    const start = { x: Math.floor(position.x), y: Math.floor(position.y) };
+    const goal = roomArrivalCell(room);
+    // The origin and destination interiors are walkable. Their wall crossings
+    // are separately checked against explicit doors, permissions and direction.
+    const origin = state.surfaceRooms.find((candidate) => candidate.type !== "corridor"
+      && pointInRect(position, candidate.x, candidate.y, candidate.width, candidate.height));
+    const blocked = new Set<string>();
+    const closed = new Set<string>();
+    for (const occupied of state.surfaceRooms) {
+      if (occupied.id === origin?.id || occupied.id === room.id || occupied.type === "corridor" && occupied.enabled) continue;
+      for (let x = occupied.x; x < occupied.x + occupied.width; x += 1) {
+        for (let y = occupied.y; y < occupied.y + occupied.height; y += 1) {
+          blocked.add(`${x},${y}`);
+          if (!occupied.enabled) closed.add(`${x},${y}`);
+        }
+      }
+    }
+    for (const corridor of state.surfaceRooms.filter((candidate) => candidate.type === "corridor" && candidate.enabled)) {
+      for (let x = corridor.x; x < corridor.x + corridor.width; x += 1) {
+        for (let y = corridor.y; y < corridor.y + corridor.height; y += 1) {
+          const key = `${x},${y}`;
+          const explicitWall = state.surfaceRooms.some((occupied) => occupied.type !== "corridor"
+            && occupied.accessPoints !== undefined && occupied.id !== origin?.id && occupied.id !== room.id
+            && pointInRect({ x, y }, occupied.x, occupied.y, occupied.width, occupied.height));
+          if (!closed.has(key) && !explicitWall) blocked.delete(key);
+        }
+      }
+    }
+    if (blocked.has(`${start.x},${start.y}`) || blocked.has(`${goal.x},${goal.y}`)) return undefined;
+    const path = getManhattanPath(start, goal, state.surfaceWidth, state.surfaceHeight, blocked,
+      (from, to) => canTraverseSurfaceAccessEdge(state, from, to, member));
+    if (path.length === 0 && (start.x !== goal.x || start.y !== goal.y)) return undefined;
+
+    // Replanning halfway through a step must not connect a fractional position
+    // diagonally to a new waypoint. Align inside the current cell on each axis.
+    const prefix: Point[] = [];
+    if (position.x !== start.x) prefix.push({ x: start.x, y: position.y });
+    if (position.y !== start.y) prefix.push(start);
+    return prefix.concat(path);
+  }
+
+  function clearStaffRoute(member: StaffMember): void {
+    member.target = undefined;
+    member.targetRoomId = undefined;
+    member.path = [];
+    member.pathIndex = 0;
+    staffRouteCache.delete(member);
+  }
+
+  function rememberStaffRoute(state: GameState, member: StaffMember, topology: string, intent: string): void {
+    staffRouteCache.set(member, {
+      state, topology, intent, roomId: member.targetRoomId,
+      position: { x: member.position.x, y: member.position.y },
+      path: member.path, pathIndex: member.pathIndex, checkedAt: state.elapsedMinutes
+    });
+  }
+
+  function chooseStaffDestination(state: GameState, member: StaffMember, topology: string,
+    service?: string, assignedRoom?: SurfaceRoom): SurfaceRoom | undefined {
+    const destinationIntent = assignedRoom ? `room:${assignedRoom.id}` : service ? `service:${service}` : "";
+    const intent = `${destinationIntent}:${member.clearance}:${getStaffSurfaceTraffic(member)}`;
+    if (!destinationIntent || member.position.layer !== "surface") {
+      clearStaffRoute(member);
+      member.routeBlockedReason = undefined;
+      return undefined;
+    }
+    const matches = (room: SurfaceRoom): boolean => room.enabled
+      && (assignedRoom ? room.id === assignedRoom.id : getSurfaceDefinition(room.type).services.includes(service as string));
+    const waiting = getStaffSurfaceAccessWait(state, member);
+    const queuedDestination = waiting ? state.surfaceRooms.find((candidate) => candidate.id === member.targetRoomId && matches(candidate)) : undefined;
+    if (queuedDestination) {
+      // Preserve FIFO order and the original expiry through temporary outages,
+      // while a changed task or access profile still leaves the queue below.
+      rememberStaffRoute(state, member, topology, intent);
+      return queuedDestination;
+    }
+    const cache = staffRouteCache.get(member);
+    if (cache?.state === state && cache.topology === topology && cache.intent === intent
+      && cache.path === member.path && cache.pathIndex === member.pathIndex
+      && cache.position.x === member.position.x && cache.position.y === member.position.y) {
+      if (cache.roomId && cache.roomId === member.targetRoomId) {
+        const cachedRoom = state.surfaceRooms.find((candidate) => candidate.id === cache.roomId && matches(candidate));
+        if (cachedRoom) {
+          member.routeBlockedReason = undefined;
+          return cachedRoom;
+        }
+      } else if (!cache.roomId && !member.targetRoomId && state.elapsedMinutes >= cache.checkedAt
+        && state.elapsedMinutes - cache.checkedAt < ROUTE_RETRY_MINUTES) {
+        return undefined;
+      }
+    }
+    const candidates = state.surfaceRooms.filter(matches).sort((a, b) => a.queue.length - b.queue.length);
+    // Keep a usable destination while a task is in progress. Its own patient
+    // entry must not make staff alternate between two hospitals every minute.
+    const current = candidates.find((candidate) => candidate.id === member.targetRoomId);
+    const ordered = current ? [current, ...candidates.filter((candidate) => candidate !== current)] : candidates;
+    for (const candidate of ordered) {
+      const path = planSurfaceRoute(state, member.position, candidate, member);
+      if (path === undefined) continue;
+      member.target = { layer: "surface", ...getRoomCenter(candidate) };
+      member.targetRoomId = candidate.id;
+      member.path = path.length ? [{ x: member.position.x, y: member.position.y }, ...path] : [];
+      member.pathIndex = path.length ? 1 : 0;
+      member.routeBlockedReason = undefined;
+      rememberStaffRoute(state, member, topology, intent);
+      return candidate;
+    }
+    clearStaffRoute(member);
+    member.routeBlockedReason = describeSurfaceRouteFailure(state, member, candidates);
+    rememberStaffRoute(state, member, topology, intent);
+    return undefined;
+  }
+
+  function staffHasArrived(member: StaffMember, room: SurfaceRoom): boolean {
+    const arrival = roomArrivalCell(room);
+    return room.enabled && member.position.layer === "surface" && member.targetRoomId === room.id
+      && member.pathIndex >= member.path.length
+      && member.position.x === arrival.x && member.position.y === arrival.y;
   }
 
   function queueStaffTreatment(state: GameState, member: StaffMember, room: SurfaceRoom, source: string, severity: number): void {
-    const alreadyQueued = room.queue.some((item) => item.kind === "patient" && item.metadata?.staffId === member.id)
-      || state.workItems.some((item) => item.kind === "patient" && item.metadata?.staffId === member.id);
-    if (alreadyQueued) return;
-    const item = createWorkItem("patient", severity, state.elapsedMinutes, source);
-    item.metadata = { staffId: member.id };
+    const isPatient = (item: WorkItem): boolean => item.kind === "patient" && item.metadata?.staffId === member.id;
+    const existing = state.surfaceRooms.flatMap((candidate) => candidate.queue).find(isPatient) || state.workItems.find(isPatient);
+    if (existing && room.queue.includes(existing)) return;
+    // A changed route moves the existing request, preserving its deadline.
+    state.surfaceRooms.forEach((candidate) => candidate.queue = candidate.queue.filter((item) => !isPatient(item)));
+    state.workItems = state.workItems.filter((item) => !isPatient(item));
+    const item = existing ?? createWorkItem("patient", severity, state.elapsedMinutes, source);
+    item.metadata = { ...item.metadata, staffId: member.id };
     room.queue.push(item);
   }
 
   function updateStaff(state: GameState): void {
+    const topology = surfaceTopologySignature(state);
     const moraleBonus = state.scps.reduce((sum, scp) => {
       if (!scp.contained) return sum;
       return sum + getSCPDefinition(scp.definitionId).moraleEffect;
     }, 0);
 
+    maintainUndergroundGates(state);
     state.staff.forEach((member) => {
       if (member.status === "dead") return;
+      // Once admitted, finish or safely evacuate this one-edge transit before
+      // changing shift, assignment or need destination. No remote work occurs.
+      if (isStaffInSurfaceAccess(state, member)) {
+        if (member.needs.contamination > 65) member.status = "quarantined";
+        else if (member.needs.health < 45 && member.status !== "quarantined") member.status = "injured";
+        member.needs.hunger = clamp(member.needs.hunger + 0.022, 0, 100);
+        member.needs.fatigue = clamp(member.needs.fatigue + 0.018, 0, 100);
+        return;
+      }
+      if (processPartialSurfaceAccessStep(state, member)) {
+        member.needs.hunger = clamp(member.needs.hunger + 0.022, 0, 100);
+        member.needs.fatigue = clamp(member.needs.fatigue + 0.018, 0, 100);
+        return;
+      }
+      if (member.position.layer === "underground" && processUndergroundGateCycle(state, member)) {
+        member.needs.hunger = clamp(member.needs.hunger + 0.022, 0, 100);
+        member.needs.fatigue = clamp(member.needs.fatigue + 0.018, 0, 100);
+        return;
+      }
+      if (member.position.layer === "underground" && member.undergroundLink) {
+        continueUndergroundLink(state, member);
+        member.needs.hunger = clamp(member.needs.hunger + 0.022, 0, 100);
+        member.needs.fatigue = clamp(member.needs.fatigue + 0.018, 0, 100);
+        return;
+      }
+      // An already admitted lift transit finishes before a shift/need change.
+      if (member.position.layer === "surface" && member.target?.layer === "underground"
+        && state.undergroundRooms.some((room) => room.id === member.targetRoomId)) {
+        continueUndergroundDescent(state, member);
+        return;
+      }
       const onShift = isOnShift(member, state.minuteOfDay);
       const difficulty = getDifficultyMultiplier(state.settings.difficulty);
+      if (!onShift && member.position.layer === "underground") {
+        advanceUndergroundReturn(state, member);
+        return;
+      }
 
       if (!onShift && member.status !== "training" && member.status !== "injured" && member.status !== "quarantined") {
         member.status = "off-duty";
@@ -203,73 +661,80 @@ namespace SCPGame {
       member.needs.stress = clamp(member.needs.stress + (state.crisis.active ? 0.07 : 0.006) * difficulty - moraleBonus * 0.0005, 0, 100);
       member.needs.morale = clamp(member.needs.morale + (state.reputation.personnel - 55) * 0.0004 - member.needs.stress * 0.0003, 0, 100);
 
-      if (member.needs.contamination > 65 && member.status !== "quarantined") {
+      if (member.needs.contamination > 65) {
         member.status = "quarantined";
-        const quarantine = findSurfaceRoomByService(state, "quarantine");
-        if (quarantine) {
-          queueStaffTreatment(state, member, quarantine, "Contamination du personnel", 8);
-          setStaffTarget(state, member, quarantine);
-        }
-        return;
-      }
-
-      if (member.needs.health < 45 && member.status !== "injured") {
+      } else if (member.needs.health < 45 && member.status !== "quarantined") {
         member.status = "injured";
-        const medical = findSurfaceRoomByService(state, "medical");
-        if (medical) {
-          queueStaffTreatment(state, member, medical, "Blessure du personnel", 6);
-          setStaffTarget(state, member, medical);
-        }
-        return;
       }
 
-      let desiredRoom: SurfaceRoom | undefined;
+      let service: string | undefined;
+      let assignedRoom: SurfaceRoom | undefined;
+      let assignedUndergroundRoom: UndergroundRoom | undefined;
+      let activity: "working" | "eating" | "resting" = "working";
       if (member.status === "quarantined") {
-        desiredRoom = findSurfaceRoomByService(state, "quarantine");
-        if (desiredRoom) queueStaffTreatment(state, member, desiredRoom, "Suivi de quarantaine", 8);
+        service = "quarantine";
       } else if (member.status === "injured") {
-        desiredRoom = findSurfaceRoomByService(state, "medical");
-        if (desiredRoom) queueStaffTreatment(state, member, desiredRoom, "Soins du personnel", 6);
+        service = "medical";
       } else if (member.needs.hunger > 72) {
-        desiredRoom = findSurfaceRoomByService(state, "food");
-        member.status = "eating";
+        service = "food";
+        activity = "eating";
       } else if (member.needs.fatigue > 75 || member.needs.stress > 78) {
-        desiredRoom = findSurfaceRoomByService(state, "rest");
-        member.status = "resting";
+        service = "rest";
+        activity = "resting";
       } else if (member.assignmentRoomId) {
         const surfaceRoom = state.surfaceRooms.find((room) => room.id === member.assignmentRoomId);
-        const undergroundRoom = state.undergroundRooms.find((room) => room.id === member.assignmentRoomId);
+        const undergroundRoom = state.undergroundRooms.find((room) => room.id === member.assignmentRoomId && room.enabled);
         if (surfaceRoom) {
-          desiredRoom = surfaceRoom;
-          if (member.status !== "moving") member.status = "working";
+          assignedRoom = surfaceRoom;
         } else if (undergroundRoom) {
-          member.position = { layer: "underground", x: undergroundRoom.x + undergroundRoom.width / 2, y: undergroundRoom.level, level: undergroundRoom.level };
-          member.target = undefined;
-          member.status = "working";
-          applyWorkFatigue(member, undergroundRoom.scpId ? 1.4 : 1);
-          return;
+          assignedUndergroundRoom = undergroundRoom;
+          if (member.position.layer === "surface") {
+            const entry = selectUndergroundEntry(state, member, undergroundRoom);
+            if (!entry) {
+              clearStaffRoute(member);
+              undergroundRouteFailure(member);
+              member.routeBlockedReason = "Aucun ascenseur et galerie accessibles pour cette habilitation";
+              return;
+            }
+            assignedRoom = entry.elevator;
+          }
         }
       } else {
-        desiredRoom = findSurfaceRoomByService(state, member.role === "researcher" ? "research" : member.role === "engineer" ? "repair" : member.role === "medic" ? "medical" : member.role === "guard" || member.role === "mtf" ? "security" : member.role === "logistics" ? "logistics" : "administration");
+        service = member.role === "researcher" ? "research" : member.role === "engineer" ? "repair" : member.role === "medic" ? "medical" : member.role === "guard" || member.role === "mtf" ? "security" : member.role === "logistics" ? "logistics" : "administration";
       }
 
-      if (desiredRoom && member.targetRoomId !== desiredRoom.id && member.position.layer === "surface") {
-        setStaffTarget(state, member, desiredRoom);
+      if (member.position.layer === "underground") {
+        if (assignedUndergroundRoom && !service) {
+          if (advanceUndergroundWalk(state, member, assignedUndergroundRoom)) {
+            applyWorkFatigue(member, assignedUndergroundRoom.scpId ? 1.4 : 1);
+          }
+        } else {
+          advanceUndergroundReturn(state, member);
+        }
+        return;
       }
 
-      if (member.position.layer === "underground" && desiredRoom) {
-        const elevator = state.surfaceRooms.find((room) => room.type === "elevator");
-        member.position = elevator ? { layer: "surface", ...getRoomCenter(elevator) } : { layer: "surface", x: 22, y: 14 };
-        setStaffTarget(state, member, desiredRoom);
+      const desiredRoom = chooseStaffDestination(state, member, topology, service, assignedRoom);
+      if (desiredRoom && (member.status === "injured" || member.status === "quarantined")) {
+        queueStaffTreatment(state, member, desiredRoom,
+          member.status === "quarantined" ? "Suivi de quarantaine" : "Soins du personnel",
+          member.status === "quarantined" ? 8 : 6);
+      }
+      if (member.status !== "injured" && member.status !== "quarantined") {
+        member.status = desiredRoom ? "moving" : "queued";
       }
 
-      if (member.path.length > member.pathIndex && member.position.layer === "surface") {
+      if (desiredRoom && member.path.length > member.pathIndex && member.position.layer === "surface") {
         const target = member.path[member.pathIndex];
-        const speed = state.settings.reducedMotion ? 0.35 : 0.55;
+        const accessHandled = processSurfaceAccessStep(state, member, target);
+        // Accessibility preferences affect rendering only, never simulation outcomes.
+        const speed = 0.55;
         const dx = target.x - member.position.x;
         const dy = target.y - member.position.y;
         const distance = Math.hypot(dx, dy);
-        if (distance <= speed) {
+        if (accessHandled) {
+          // Waiting or admitted airlock staff stay on their source cell.
+        } else if (distance <= speed) {
           member.position.x = target.x;
           member.position.y = target.y;
           member.pathIndex += 1;
@@ -277,14 +742,31 @@ namespace SCPGame {
           member.position.x += dx / distance * speed;
           member.position.y += dy / distance * speed;
         }
-      } else if (desiredRoom && member.position.layer === "surface") {
+      }
+      if (desiredRoom && assignedUndergroundRoom && staffHasArrived(member, desiredRoom)) {
+        const entry = selectUndergroundEntry(state, member, assignedUndergroundRoom);
+        if (entry && entry.elevator.id === desiredRoom.id) {
+          member.target = undergroundRoomPosition(state, entry.shaft);
+          member.targetRoomId = assignedUndergroundRoom.id;
+          member.taskProgress = 0;
+          member.path = [];
+          member.pathIndex = 0;
+          member.status = "moving";
+          return;
+        }
+        undergroundRouteFailure(member);
+        return;
+      }
+      if (desiredRoom && staffHasArrived(member, desiredRoom)) {
         if (member.status === "injured" || member.status === "quarantined") {
           member.needs.stress = clamp(member.needs.stress - 0.03, 0, 100);
-        } else if (getSurfaceDefinition(desiredRoom.type).services.includes("food")) {
+        } else if (activity === "eating") {
+          member.status = "eating";
           member.needs.hunger = clamp(member.needs.hunger - 0.45, 0, 100);
           member.needs.morale = clamp(member.needs.morale + 0.05, 0, 100);
           if (member.needs.hunger < 25) member.status = "working";
-        } else if (getSurfaceDefinition(desiredRoom.type).services.includes("rest")) {
+        } else if (activity === "resting") {
+          member.status = "resting";
           member.needs.fatigue = clamp(member.needs.fatigue - 0.32, 0, 100);
           member.needs.stress = clamp(member.needs.stress - 0.22, 0, 100);
           if (member.needs.fatigue < 35 && member.needs.stress < 45) member.status = "working";
@@ -292,6 +774,12 @@ namespace SCPGame {
           member.status = "working";
           applyWorkFatigue(member, 1);
         }
+      }
+
+      const route = staffRouteCache.get(member);
+      if (route) {
+        route.position = { x: member.position.x, y: member.position.y };
+        route.pathIndex = member.pathIndex;
       }
 
       if (member.needs.fatigue > 92 || member.needs.stress > 94) {
@@ -353,11 +841,14 @@ namespace SCPGame {
   }
 
   function roomServiceEfficiency(state: GameState, room: SurfaceRoom): number {
+    if (!room.enabled) return 0;
     const definition = getSurfaceDefinition(room.type);
     const staff = room.staffAssigned
       .map((id) => state.staff.find((member) => member.id === id))
-      .filter((member): member is StaffMember => Boolean(member && member.status !== "dead" && member.status !== "off-duty"));
+      .filter((member): member is StaffMember => Boolean(member && member.status === "working"
+        && member.assignmentRoomId === room.id && staffHasArrived(member, room)));
     const required = Object.values(definition.requiredRoles).reduce((sum, count) => sum + (count ?? 0), 0);
+    if (required > 0 && staff.length === 0) return 0;
     const staffing = required === 0 ? 1 : clamp(staff.length / required, 0, 1.4);
     const wellness = staff.length === 0 ? (required === 0 ? 1 : 0.25) : staff.reduce((sum, member) => sum + (1 - member.needs.fatigue / 180 - member.needs.stress / 220), 0) / staff.length;
     const utility = state.resources.power > 5 && state.resources.water > 3 ? 1 : 0.55;
@@ -365,22 +856,31 @@ namespace SCPGame {
     return clamp(staffing * wellness * utility * condition * (1 + (room.level - 1) * 0.15), 0.05, 2.2);
   }
 
+  function patientIsPresent(state: GameState, room: SurfaceRoom, item: WorkItem): boolean {
+    const staffId = item.kind === "patient" ? item.metadata?.staffId : undefined;
+    if (typeof staffId !== "string") return true;
+    const patient = state.staff.find((member) => member.id === staffId);
+    return Boolean(patient && patient.status !== "dead" && staffHasArrived(patient, room));
+  }
+
   function processSurfaceQueues(state: GameState): void {
     state.surfaceRooms.forEach((room) => {
-      if (!room.enabled || room.queue.length === 0) return;
-      const definition = getSurfaceDefinition(room.type);
-      const efficiency = roomServiceEfficiency(state, room);
-      const capacity = Math.max(1, Math.floor(definition.capacity / 4));
-      room.queue.slice(0, capacity).forEach((item) => {
-        item.progress += efficiency * (12 / Math.max(1, item.severity));
-      });
-      const completed = room.queue.filter((item) => item.progress >= 100);
-      completed.forEach((item) => completeWorkItem(state, room, item));
-      room.queue = room.queue.filter((item) => item.progress < 100);
-
+      // Closing a room pauses its service, not the deadline of queued work.
       const expired = room.queue.filter((item) => state.elapsedMinutes > item.expiresAt);
       expired.forEach((item) => failWorkItem(state, room, item));
       room.queue = room.queue.filter((item) => state.elapsedMinutes <= item.expiresAt);
+      if (!room.enabled || room.queue.length === 0) return;
+      const definition = getSurfaceDefinition(room.type);
+      const efficiency = roomServiceEfficiency(state, room);
+      if (efficiency <= 0) return;
+      const capacity = Math.max(1, Math.floor(definition.capacity / 4));
+      const ready = room.queue.filter((item) => patientIsPresent(state, room, item)).slice(0, capacity);
+      ready.forEach((item) => {
+        item.progress += efficiency * (12 / Math.max(1, item.severity));
+      });
+      const completed = ready.filter((item) => item.progress >= 100);
+      completed.forEach((item) => completeWorkItem(state, room, item));
+      room.queue = room.queue.filter((item) => !completed.includes(item));
     });
 
     state.workItems = state.workItems.filter((item) => {
@@ -389,7 +889,14 @@ namespace SCPGame {
         return false;
       }
       const service = item.kind === "patient" ? "medical" : item.kind === "delivery" ? "delivery" : item.kind === "anomaly" ? "anomaly" : item.kind === "repair" ? "repair" : item.kind === "research" ? "research" : item.kind === "inspection" ? "cover" : "access";
-      const room = findSurfaceRoomByService(state, service);
+      const staffId = item.kind === "patient" ? item.metadata?.staffId : undefined;
+      const patient = typeof staffId === "string" ? state.staff.find((member) => member.id === staffId) : undefined;
+      // A staff treatment request follows the reachable destination selected by
+      // that patient. Ordinary external work keeps the queue-based allocation.
+      const room = typeof staffId === "string"
+        ? state.surfaceRooms.find((candidate) => candidate.id === patient?.targetRoomId && candidate.enabled
+          && getSurfaceDefinition(candidate.type).services.includes(patient?.status === "quarantined" ? "quarantine" : "medical"))
+        : findSurfaceRoomByService(state, service);
       if (room) {
         room.queue.push(item);
         return false;
@@ -477,6 +984,7 @@ namespace SCPGame {
     member.needs.health = clamp(member.needs.health - amount, 0, 100);
     if (member.needs.health <= 0) {
       member.status = "dead";
+      cancelStaffSurfaceAccess(state, member.id);
       state.reputation.personnel = clamp(state.reputation.personnel - 5, 0, 100);
       logHistory(state, `${member.name} est décédé en service.`);
     }
@@ -527,16 +1035,23 @@ namespace SCPGame {
 
     const assignedMembers = room.staffAssigned
       .map((id) => state.staff.find((member) => member.id === id))
-      .filter((member): member is StaffMember => Boolean(member && !["dead", "off-duty", "injured", "quarantined", "training"].includes(member.status)));
+      .filter((member): member is StaffMember => Boolean(member && member.status === "working"
+        && canStaffEnterUndergroundRoom(room, member) && staffIsAtUndergroundRoom(member, room)));
     const requiredStaff = Object.values(scpDefinition.requirements.staff).reduce((sum, count) => sum + (count ?? 0), 0);
     const plannedStaff = Math.max(requiredStaff, procedure.assignedStaff);
     score += plannedStaff === 0 ? 8 : clamp(assignedMembers.length / plannedStaff * 15, 0, 18);
     const avgTraining = assignedMembers.length ? assignedMembers.reduce((sum, member) => sum + member.experience, 0) / assignedMembers.length : 0;
     score += clamp((avgTraining - procedure.trainingRequired) * 0.15, -12, 8);
 
+    const utilities = getUndergroundUtilityStatus(state, room);
     const powerRatio = state.resources.powerCapacity > 0 ? state.resources.power / state.resources.powerCapacity : 0;
-    if (powerRatio >= scpDefinition.requirements.powerReliability) score += 10;
+    if (!utilities.power) score -= 36;
+    else if (powerRatio >= scpDefinition.requirements.powerReliability) score += 10;
     else score -= (scpDefinition.requirements.powerReliability - powerRatio) * 35;
+    // Life support and water cooling are local services. Global reserves do
+    // not travel across a broken cable, valve or absent physical duct.
+    if (!utilities.air) score -= 26;
+    if (roomDefinition.waterUse > 0 && !utilities.water) score -= 12;
 
     const flags = scpDefinition.requirements.procedureFlags;
     if (flags.includes("backup-power")) score += procedure.backupPower ? 6 : -12;
@@ -643,8 +1158,12 @@ namespace SCPGame {
       if (room.type === "laboratory") research += 0.45 * efficiency;
       if (room.type === "archive") { research += 0.2 * efficiency; intel += 0.3 * efficiency; }
     });
+    const undergroundUtilities = getUndergroundUtilityMap(state);
     state.undergroundRooms.filter((room) => room.type === "research-lab" && room.enabled).forEach((room) => {
-      research += 0.5 * room.condition / 100;
+      const utilities = undergroundUtilities.get(room.id);
+      // Research equipment needs electricity and climate control; power
+      // stored at the Site does not run a disconnected laboratory.
+      if (utilities?.power && utilities.air) research += 0.5 * room.condition / 100;
     });
     state.resources.research += research;
     state.resources.intel += intel;
@@ -1220,3 +1739,4 @@ namespace SCPGame {
     return hash;
   }
 }
+

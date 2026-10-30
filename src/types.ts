@@ -23,6 +23,8 @@ namespace SCPGame {
   export interface LayerPoint extends Point {
     layer: Layer;
     level?: number;
+    /** Transverse row in the underground plane; y still describes depth there. */
+    sectionY?: number;
   }
 
   export interface Cost {
@@ -124,6 +126,54 @@ namespace SCPGame {
     enabled: boolean;
   }
 
+  export type SurfaceAccessSide = "north" | "east" | "south" | "west";
+  export type SurfaceTraffic = "public" | "staff" | "security" | "medical" | "contaminated" | "freight" | "anomaly";
+
+  export interface SurfaceAccessRequest {
+    staffId: string;
+    from: Point;
+    to: Point;
+    requestedAt: number;
+    expiresAt: number;
+  }
+
+  export interface SurfaceAccessCycle extends SurfaceAccessRequest {
+    phase: "entering" | "equalizing" | "exiting";
+    remaining: number;
+  }
+
+  export interface SurfaceAccess {
+    id: string;
+    side: SurfaceAccessSide;
+    offset: number;
+    kind: "door" | "airlock";
+    enabled: boolean;
+    minClearance: 0 | 1 | 2 | 3 | 4 | 5;
+    allowedTraffic: SurfaceTraffic[];
+    direction: "both" | "in" | "out";
+    queueCapacity: number;
+    powered: boolean;
+    airSupply: boolean;
+    queue: SurfaceAccessRequest[];
+    cycle?: SurfaceAccessCycle;
+    passedCount: number;
+    paidFunds: number;
+    paidParts: number;
+  }
+
+  export interface SurfaceAccessConfig {
+    side: SurfaceAccessSide;
+    offset: number;
+    kind: "door" | "airlock";
+    enabled: boolean;
+    minClearance: 0 | 1 | 2 | 3 | 4 | 5;
+    allowedTraffic: SurfaceTraffic[];
+    direction: "both" | "in" | "out";
+    queueCapacity: number;
+    powered: boolean;
+    airSupply: boolean;
+  }
+
   export interface SurfaceRoom {
     id: string;
     type: SurfaceRoomType;
@@ -140,6 +190,45 @@ namespace SCPGame {
     enabled: boolean;
     powerPriority: number;
     name?: string;
+    accessPoints?: SurfaceAccess[];
+  }
+
+  export interface UndergroundGateCycle {
+    staffId: string;
+    fromId: string;
+    toId: string;
+    phase: "equalizing" | "crossing" | "retreating";
+    remaining: number;
+  }
+
+  export interface UndergroundGate {
+    id: string;
+    roomAId: string;
+    roomBId: string;
+    kind: "door" | "airlock";
+    enabled: boolean;
+    minClearance: 0 | 1 | 2 | 3 | 4 | 5;
+    direction: "both" | "a-to-b" | "b-to-a";
+    powered: boolean;
+    airSupply: boolean;
+    queueCapacity: number;
+    queue: string[];
+    cycle?: UndergroundGateCycle;
+    passedCount: number;
+    paidFunds: number;
+    paidParts: number;
+  }
+
+
+  /** Installed cable/pipe/duct bundle between two physically adjacent modules. */
+  export interface UndergroundConduit {
+    roomAId: string;
+    roomBId: string;
+    power: boolean;
+    water: boolean;
+    air: boolean;
+    paidFunds: number;
+    paidParts: number;
   }
 
   export interface UndergroundRoom {
@@ -147,6 +236,8 @@ namespace SCPGame {
     type: UndergroundRoomType;
     x: number;
     level: number;
+    /** Transverse coordinate; omitted in historical one-section saves. */
+    y?: number;
     width: number;
     condition: number;
     staffAssigned: string[];
@@ -198,6 +289,9 @@ namespace SCPGame {
     loyalty: number;
     compromised: boolean;
     taskProgress: number;
+    routeBlockedReason?: string;
+    /** Physical crossing between adjacent underground rows, persisted mid-step. */
+    undergroundLink?: { fromId: string; toId: string; crossingX: number };
   }
 
   export interface WorkItem {
@@ -435,6 +529,12 @@ namespace SCPGame {
     regionFacilities: RegionFacility[];
     surfaceRooms: SurfaceRoom[];
     undergroundRooms: UndergroundRoom[];
+    /** Configured physical junctions; absent on old saves. */
+    undergroundGates?: UndergroundGate[];
+    /** True physical service circuits, no automatic links for new modules. */
+    undergroundConduits?: UndergroundConduit[];
+    /** Region annex whose derived interior is currently being inspected. */
+    activeInteriorFacilityId?: string;
     staff: StaffMember[];
     workItems: WorkItem[];
     scps: SCPInstance[];
@@ -471,3 +571,4 @@ namespace SCPGame {
     animationFrame: number;
   }
 }
+

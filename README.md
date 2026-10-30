@@ -1,6 +1,6 @@
 # SCP Foundation: Site Director — Deep Protocol
 
-**Version 1.0.0 — build jouable hors ligne**  
+**Base 1.0.0 — build jouable hors ligne, tranche Operations : région, intérieurs d’annexes et réseau souterrain multi-axes**  
 City-builder régional, gestion opérationnelle du complexe de surface, confinement vertical souterrain et commandement tactique de crise.
 
 ![Gestion du complexe de surface](tests/surface.png)
@@ -32,7 +32,83 @@ Le build contient notamment :
 
 La représentation est une **3D stylisée en 2.5D/isométrique par Canvas** : région en perspective, surface en plan de gestion et souterrain en coupe latérale. L’architecture est prête pour une future couche WebGL réellement volumétrique sans devoir réécrire la simulation.
 
+## Accès de surface — tranche Operations
+
+Les salles de surface disposent maintenant de portes et de sas placés sur leurs murs. Le panneau **Portes et sas** permet de choisir l'emplacement, l'habilitation minimale, les flux autorisés et le sens de circulation. Le personnel emprunte réellement les passages autorisés ; un refus d'accès arrête son trajet et apparaît dans sa fiche.
+
+Les sas traitent une personne à la fois, dans l'ordre d'arrivée, avec admission, égalisation et sortie. Une panne d'électricité ou d'air ferme les deux portes et suspend le cycle. L'évacuation manuelle replace l'occupant du côté d'origine et verrouille le passage, sans compter de traversée. La file, le cycle et le compteur sont sauvegardés.
+
+Les sauvegardes antérieures reçoivent des portes compatibles sans remplacer leurs salles ni leur personnel. Les réglages d'accès s'appliquent à chaque passage : sécuriser une salle exige de configurer tous ses accès.
+
+Cette tranche conserve la version de base 1.0.0. Les portes/sas et les déplacements souterrains sont désormais intégrés. Le dessin libre des salles, les flux autonomes de public/fret/SCP et les autres systèmes de la version Operations complète restent dans la feuille de route.
+
+## Circulation souterraine physique — tranche Operations
+
+Depuis le 30 octobre 2026, les déplacements des agents utilisent les **galeries réellement construites** et non une téléportation. Deux modules au même niveau doivent se toucher pour permettre le passage ; deux puits sont reliés verticalement uniquement s'ils sont alignés sur des niveaux consécutifs. Un module désactivé, dégradé ou scellé coupe la route. Les itinéraires sont recalculés lorsque la topologie ou les autorisations changent.
+
+Le personnel rejoint un **ascenseur accessible en surface**, descend pendant quatre minutes de simulation, puis marche à **0,55 unité de plan par minute** sur la carte souterraine ; une panne électrique suspend le transfert. Plusieurs puits peuvent proposer des itinéraires alternatifs. Les niveaux d'habilitation de la salle de destination **et des modules traversés** sont contrôlés. Pour remonter et rejoindre ses besoins de surface, un agent marche jusqu'à un puits et reprend un trajet vertical temporisé. Un équipier encore en trajet ne contribue pas à la conformité d'un confinement SCP.
+
+Dans la vue **Sous-sol**, sélectionner un module permet de voir son habilitation, son lien vers un ascenseur et l'état de sa galerie, puis de **sceller / rouvrir le secteur**. Le plan montre les raccords physiques utilisables. Les sauvegardes reprennent les déplacements en cours sans modifier leur schéma de compatibilité.
+
+**Validation :** [92 tests métier et 17 scénarios navigateur réussis le 30 octobre 2026](docs/qa/2026-10-30/UNDERGROUND_NETWORK.md). Le jeu reste basé sur la version 1.0.0 ; la version Operations 1.1 complète n'est pas déclarée livrée.
+
+## Un même Site, trois vues liées — tranche Operations (30 octobre 2026)
+
+**Région / ville :** le bâtiment principal, situé au sud-est de la carte, affiche les **toitures réellement dérivées** de chaque salle du complexe de surface. Les installations régionales distinctes (centrale, dépôt, parking, couverture, voirie) restent des **annexes extérieures**. La parcelle du bâtiment principal est réservée : on construit ses salles dans la vue Surface. Sélectionnez une toiture pour retrouver la même salle, le même identifiant et la même emprise dans l'intérieur du Site. Construire ou démolir une pièce actualise aussitôt sa toiture, sans seconde liste de bâtiments divergente.
+
+**Surface / intérieur :** le plan au sol correspond exactement aux toitures de la vue régionale par une projection isométrique inversible. La ligne jaune **A-A** indique la coupe longitudinale utilisée pour la représentation souterraine. Les puits reliés sont marqués à l'emplacement effectif de leur ascenseur. Le panneau d'une pièce permet d'ouvrir sa toiture dans la vue Région et, si elle traverse l'axe A-A, sa position souterraine.
+
+**Sous-sol :** une bande au-dessus du premier niveau montre les vraies pièces situées sur l'axe A-A. Un puits n'est accessible que si son débouché coïncide **dans la même coupe** avec l'emprise d'un ascenseur de surface actif. Les agents conservent les déplacements physiques et les retours temporisés introduits auparavant. La vue souterraine reste une **coupe 2.5D horizontale et verticale**, et non un volume 3D complet : une pièce de surface hors de A-A n'a volontairement pas de faux module à son aplomb.
+
+**Sauvegardes :** aucun identifiant de salle ni bâtiment miroir n'a été ajouté aux sauvegardes. Les annexes des anciennes parties qui recouperaient exceptionnellement la nouvelle emprise ne sont pas déplacées ni supprimées. Les anciennes parties restent importables selon le schéma de validation actuel.
+
+**Vérification :** 101 tests métier et 18 étapes navigateur Chromium réussis pour le lot fonctionnel, sans erreur console. [Rapport QA des vues liées](docs/qa/2026-10-30/THREE_VIEW_SPATIAL_CONTINUITY.md). La base du jeu demeure **1.0.0** ; cette tranche ne signifie pas que toute la version Operations 1.1 est terminée.
+
+## Annexes explorables et sous-sol sur trois coordonnées — tranche Operations
+
+Le plan régional **reste la vue extérieure du même territoire**. En sélectionnant un bâtiment régional exploitable (centrale, eau, dépôt, etc.) puis **Explorer l’intérieur**, on ouvre désormais son plan intérieur, distinct de celui du bâtiment principal. Chaque annexe affiche **quatre zones fonctionnelles schématiques et inspectables**, dérivées de son type, de son niveau et de son état réels. Un clic choisit une zone et décrit son usage. Les routes et espaces verts ne sont pas présentés comme des bâtiments habitables. **Attention : ces pièces d’annexe sont consultatives** : elles ne sont pas encore des pièces librement constructibles, ni des salles possédant des employés/pathfinders indépendants. Les ressources proviennent toujours de l’installation régionale d’origine, sans double comptage.
+
+La simulation souterraine n'est plus limitée au seul trait de coupe A-A. Chaque module peut avoir trois coordonnées : **x, Y (coupe transversale) et profondeur**. Depuis la vue Sous-sol, les boutons **Coupe précédente / suivante**, ou le menu **Accès direct à une coupe**, parcourent l’axe Y et la mini-carte montre tous les modules d'un **niveau sélectionné** dans un véritable plan horizontal X–Y. On peut changer la profondeur visualisée et sélectionner un module sur le plan pour retrouver sa coupe. Un module construit sur une nouvelle coupe reste à cet endroit, séparé des emprises occupées sur les autres coupes.
+
+Les galeries se raccordent horizontalement en X, transversalement en Y lorsque leurs empreintes en X se chevauchent, et verticalement par des puits d’ascenseur alignés sur X **et** Y. Le personnel marche physiquement entre les coupes (vitesse 0,55 unité/minute), respecte les habilitations, attend les ascenseurs et peut contourner un secteur fermé par un autre itinéraire. La progression d’une jonction transversale est sérialisée pour reprendre après sauvegarde. Un accès de surface ne donne un accès souterrain que si son puits émerge réellement **sous son ascenseur à ces deux coordonnées**.
+
+**Compatibilité :** les anciens modules souterrains sans coordonnée Y sont migrés sur la coupe initiale (Y=14 pour le plan de départ), sans déplacer les SCP ou reconstruire les salles. La validation de chargement accepte les anciens schémas reconnus et refuse les jonctions inventées ou coordonnées invalides ; le marqueur de schéma passe à 4. L'intérieur d'une annexe sélectionnée se conserve au rechargement.
+
+Le jeu est toujours rendu en **2.5D avec coupe et mini-carte 2D** : il possède désormais une topologie et une navigation tridimensionnelles, **pas** un affichage WebGL 3D volumétrique ni des étages d'annexes modélisés en 3D. Des sas souterrains configurables, véritables portes de traversée, occupation détaillée des annexes et agents passant entre bâtiments restent à développer.
+
+**Tests :** **119/119 tests métier** (17 nouveaux tests de réseau et d'annexes, plus une régression sur le menu Surface), **20/20 étapes Chromium**, aucune erreur console. La validation complète et le paquet jouable sont consignés dans le [rapport QA](docs/qa/2026-10-30/THREE_AXIS_UNDERGROUND_AND_ANNEXES.md). La base reste 1.0.0 ; Operations 1.1 complète n'est pas déclarée livrée.
+
+## Portes et sas physiques des galeries — tranche Operations (30 octobre 2026)
+
+Sur chaque module souterrain, le panneau **Portes et sas souterrains** liste les liaisons réelles à une galerie voisine (axe X ou entre deux coupes Y adjacentes). Pour chaque seuil, on peut installer une **porte** ou un **sas interverrouillé**, puis régler l'habilitation (0–5), le sens et le verrouillage. Les portes coûtent 650 crédits et 2 pièces, les sas 2 600 crédits et 7 pièces ; une installation en doublon est refusée avant paiement.
+
+Les accès modifient le **graphe de déplacement** des employés, pas seulement son dessin. Une porte fermée au milieu du franchissement impose un retour à vitesse normale sans passage fantôme. Un sas traite **un occupant à la fois**, avec file **FIFO**, quatre minutes simulées d'égalisation puis une traversée physique. Les pannes d'électricité ou d'air suspendent le cycle. Une évacuation manuelle ramène l'occupant du côté d'origine, sans compter de traversée. Les portes/sas installés restent visibles en coupe et sur la mini-carte : vert = porte, ambre = sas, rouge = accès fermé ou inaccessible.
+
+**Sauvegardes :** files, cycles, passages et coûts réellement réglés sont persistants ; une ancienne sauvegarde sans porte souterraine conserve ses galeries ouvertes. Le nouveau marqueur de schéma est **5** ; les références orphelines, double accès sur la même liaison et cycles falsifiés sont rejetés.
+
+**Validation :** [132 tests métier et 21 étapes Chromium réussis dans la CI](https://github.com/darknigthmare/scp-foundation-site-director/actions/runs/41060363210), aucun message navigateur. Le code contrôle des seuils X/Y mais reste dessiné en **2.5D** ; ce n'est ni une reconstruction 1:1 canonique d'un site SCP ni un moteur WebGL 3D achevé. Voir le [rapport QA](docs/qa/2026-10-30/UNDERGROUND_GATES_AND_AIRLOCKS.md).
+
+## Réseaux techniques souterrains physiques — tranche Operations (30 octobre 2026)
+
+Le sous-sol distingue maintenant trois services **indépendants** : alimentation électrique, distribution d'eau et ventilation. Les câbles, conduites et gaines suivent les **vraies jonctions des modules (X–Y–profondeur)**, séparément des portes/sas de circulation. Sélectionnez un module pour consulter les trois états et, sur chaque paroi contiguë, **poser une gaine technique** (850 crédits et 4 pièces), isoler/rétablir les trois circuits ou démonter l'installation avec remboursement partiel plafonné aux sommes réellement payées.
+
+Une **nouvelle pièce n'est pas automatiquement alimentée** : elle doit rejoindre la distribution par une liaison technique. Les anciens Sites possèdent, après migration, les raccordements correspondant à leurs volumes déjà construits, sans facturation ni déplacement du personnel. Les coupures n'inventent pas de connexion à travers la roche. Les sections peuvent recevoir des circuits de secours par un autre chemin X/Y ; une coupure de porte pour le personnel ne retire pas les conduites installées dans la cloison.
+
+Le courant descend depuis les ascenseurs raccordés en surface ; les **nœuds énergétiques** peuvent secourir leur réseau local tant qu'il reste de l'énergie stockée. Les réserves d'eau parviennent par les puits raccordés, et une filtration souterraine **réellement alimentée** contribue à la ventilation locale. Une cellule SCP privée d'alimentation/ventilation voit sa conformité diminuer, un laboratoire non raccordé ne produit plus de recherche, et un sas souterrain sans courant ou air sur ses deux côtés suspend son cycle. Les ascenseurs exigent une alimentation physique dans leur puits.
+
+Les **barres de couleur** au bas des modules montrent en coupe l'état du courant (jaune), de l'eau (bleu) et de l'air (vert) : rouge atténué quand le service est interrompu. Les vannes sont accessibles au clavier et au tactile dans le panneau **Réseaux techniques physiques**.
+
+Le marqueur de sauvegarde est désormais **6** ; les schémas plus anciens sont migrés, les connexions orphelines, doubles, géométriquement impossibles ou aux coûts falsifiés sont rejetées. Cette simulation concerne les circuits de distribution et leur disponibilité ; elle n'est **pas encore une simulation volumétrique de fluides, pression, combustion ou plomberie détaillée**, ni une reconstruction SCP canonique universelle.
+
+[Rapport QA et limites détaillées](docs/qa/2026-10-30/UNDERGROUND_TECHNICAL_NETWORKS.md).
+
 ## Lancement rapide
+
+### Archive avec le build fourni
+
+Le paquet cumulatif contient le code, un dossier `dist/` jouable, le rapport navigateur, les captures et des empreintes SHA-256. Avec Node.js 18 ou plus récent, lancer `npm start` depuis le dossier extrait, puis ouvrir `http://127.0.0.1:4173`. La recompilation n'est nécessaire que pour modifier les sources.
+
+Le workflow GitHub Actions produit l'artefact **scp-operations-package** après la réussite des tests. `release/BUILD_INFO.json` identifie le commit et le bundle ; `release/FILES_SHA256SUMS.txt` décrit les fichiers de l'archive. Le `SHA256SUMS.txt` historique à la racine conserve son rôle de provenance de l'archive initiale.
 
 ### Windows
 
@@ -114,7 +190,7 @@ npm run check
 npm test
 ```
 
-`npm test` reconstruit le bundle TypeScript, exécute les 12 tests métier Node et contrôle la structure publiable, les icônes PWA, la licence et l'attribution. Les validations navigateur, mobile, PWA installée et HTTP sont documentées séparément dans le rapport QA.
+`npm test` reconstruit le bundle TypeScript, exécute tous les tests métier de `tests/*.test.mjs` et contrôle la structure publiable, les icônes PWA, la licence et l'attribution. Les scénarios couvrent aussi les règles d'accès, les files et cycles des sas, les pannes et la validation des sauvegardes.
 
 Test navigateur complet facultatif, si Python et Playwright sont disponibles :
 
@@ -122,7 +198,7 @@ Test navigateur complet facultatif, si Python et Playwright sont disponibles :
 python tests/smoke.py
 ```
 
-Le rapport du dernier passage est dans `tests/smoke-report.json`. Les captures de validation sont conservées dans `tests/`.
+Le rapport du passage courant et les captures sont écrits dans `test-results/smoke/`, puis téléversés par la CI. Le navigateur utilise un serveur HTTP et le stockage natif, avec reprise après rechargement, fermeture complète et perte du réseau. Les fichiers historiques dans `tests/` restent des preuves datées.
 
 ## Structure du dépôt
 
@@ -132,6 +208,7 @@ Le rapport du dernier passage est dans `tests/smoke-report.json`. Les captures d
 │   ├── types.ts          # modèle de données
 │   ├── data.ts           # catalogue de contenu
 │   ├── utils.ts          # fonctions partagées
+│   ├── access.ts         # passages, profils et cycles des sas
 │   ├── state.ts          # création, sauvegarde et actions
 │   ├── simulation.ts     # économie, agents, SCP et crises
 │   ├── renderers.ts      # vues Canvas multi-couches
@@ -176,3 +253,4 @@ Cette version est une simulation de gestion complète et jouable, pensée comme 
 ## Licence et attribution
 
 Le projet dérive de contenus de l’univers SCP Foundation. Voir `LICENSE.md` et `ATTRIBUTION.md` avant toute redistribution ou modification. Aucun visuel, son ou fichier média du wiki SCP n’est intégré au build : l’interface, les symboles et les rendus sont générés localement par le projet.
+

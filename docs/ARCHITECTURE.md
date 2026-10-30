@@ -28,6 +28,10 @@ Catalogue data-driven : définitions des constructions, SCP, recherches, événe
 
 Mathématiques, formatage, identifiants, choix pondérés, coûts et fonctions génériques.
 
+### `src/access.ts`
+
+Géométrie des seuils, passages autorisés, profils de circulation du personnel et machine à états des sas. Une porte est une arête entre deux cases adjacentes ; le pathfinding valide cette arête indépendamment de l'occupation des cases. Les sas conservent une file bornée et un seul cycle ; le rendu déduit l'ouverture des vantaux de la phase et de l'alimentation. Les pannes figent le cycle, jamais l'invariant des deux portes.
+
 ### `src/state.ts`
 
 Création de partie, migration/normalisation des sauvegardes, sérialisation, construction, amélioration, réparation, démolition, recrutement, recherche, transfert SCP et actions atomiques.
@@ -124,3 +128,12 @@ Le rendu ne doit jamais devenir la source de vérité. Les scènes reflètent `G
 ## 13. Tests
 
 `npm run check` vérifie la présence du build et des systèmes structurants. `tests/smoke.py` charge le build dans Chromium, construit sur les trois couches, transfère un SCP, modifie une procédure, sauvegarde, lance une crise et vérifie le responsive.
+
+
+## 14. Accès de surface et migration du schéma 3
+
+`SurfaceRoom.accessPoints` contient configuration, investissement, file, cycle et compteur. Une propriété absente déclenche une migration déterministe ; un tableau explicitement vide conserve une salle sans passage. Les requêtes référencent un agent vivant à la case d'origine et deux cases adjacentes correspondant exactement au seuil. Les imports refusent les identifiants dupliqués, les doubles réservations, les phases invalides et les références incohérentes avant reprise.
+
+Les identifiants, ressources et constructions compatibles restent inchangés. Les routes restent des données dérivées : un changement d'accès, de salle, de profil ou de partie chargée invalide leur cache. L'admission d'un sas réserve l'agent jusqu'à la fin du cycle ou son évacuation ; les changements de tâche ne peuvent pas produire un deuxième franchissement.
+
+`scripts/package_release.py` rassemble les fichiers suivis, le build réellement compilé et les preuves navigateur du passage courant. Il vérifie le ZIP et émet ses empreintes SHA-256. La version du jeu reste 1.0.0 ; le schéma interne de chargement ne constitue pas une annonce de livraison de la version Operations complète.

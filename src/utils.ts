@@ -138,8 +138,10 @@ namespace SCPGame {
     return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
   }
 
-  export function undergroundOverlap(a: { x: number; level: number; width: number }, b: { x: number; level: number; width: number }): boolean {
-    return a.level === b.level && a.x < b.x + b.width && a.x + a.width > b.x;
+  export function undergroundOverlap(a: { x: number; y?: number; level: number; width: number },
+    b: { x: number; y?: number; level: number; width: number }): boolean {
+    return a.level === b.level && (a.y ?? 14) === (b.y ?? 14)
+      && a.x < b.x + b.width && a.x + a.width > b.x;
   }
 
   export function deepClone<T>(value: T): T {
@@ -157,7 +159,14 @@ namespace SCPGame {
     return entries[entries.length - 1];
   }
 
-  export function getManhattanPath(start: Point, target: Point, width: number, height: number, blocked?: Set<string>): Point[] {
+  export function getManhattanPath(start: Point, target: Point, width: number, height: number, blocked?: Set<string>, canStep?: (from: Point, to: Point) => boolean): Point[] {
+    // Callers choose which room cells are traversable. This grid helper never
+    // overrides an obstacle, including one at the start or destination.
+    const validCell = (point: Point): boolean => Number.isInteger(point.x) && Number.isInteger(point.y)
+      && point.x >= 0 && point.y >= 0 && point.x < width && point.y < height;
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0
+      || !validCell(start) || !validCell(target)
+      || blocked?.has(`${start.x},${start.y}`) || blocked?.has(`${target.x},${target.y}`)) return [];
     const queue: Point[] = [start];
     const cameFrom = new Map<string, string>();
     const startKey = `${start.x},${start.y}`;
@@ -178,7 +187,8 @@ namespace SCPGame {
         const next = { x: current.x + direction.x, y: current.y + direction.y };
         const key = `${next.x},${next.y}`;
         if (next.x < 0 || next.y < 0 || next.x >= width || next.y >= height) continue;
-        if (blocked?.has(key) && key !== targetKey) continue;
+        if (blocked?.has(key)) continue;
+        if (canStep && !canStep(current, next)) continue;
         if (cameFrom.has(key)) continue;
         cameFrom.set(key, currentKey);
         queue.push(next);
@@ -245,3 +255,4 @@ namespace SCPGame {
     }
   }
 }
+

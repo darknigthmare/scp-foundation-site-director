@@ -1,0 +1,37 @@
+{
+  "verifiedAt": "2026-10-29",
+  "functionalCommit": "01e503ea9bfa1bf11a62dcb690cabc859146cbce",
+  "testedMergeCommit": "f7a428a2e1ce72bec697ec61ea4a2a61afb517f5",
+  "matchingGitTree": "e2420077c72189ffbab7d357bb3652667aab2eec",
+  "workflowRun": "40933133552",
+  "unitTests": {
+    "passed": 83,
+    "failed": 0
+  },
+  "browserSteps": {
+    "passed": 16,
+    "failed": 0
+  },
+  "browserMessages": 0,
+  "buildHashes": {
+    "game.js": "9ebcfdc385ab093d7c37fc20f932d353a3146a32846c501ba0dd5212f9b08aed",
+    "styles.css": "f17527923ae1f6b221e64d43fe4950f50fe8fdba450c8177cdcc8263e2846162",
+    "service-worker.js": "4701bc012789ae58bc3a5b0bd83cbafca855bc094bbd6694517ae25146e8bbbc"
+  },
+  "packageSha256": "45a6daea1761f9b40f76de45ddf0e78c034c22ee465879a8421ec38c5966d681",
+  "verifiedPackageManifestFiles": 95,
+  "visualReview": {
+    "desktop": {
+      "width": 1600,
+      "height": 1000,
+      "reviewed": true
+    },
+    "mobile": {
+      "width": 430,
+      "height": 932,
+      "reviewed": true,
+      "device": "Chromium viewport"
+    }
+  },
+  "vercelDeployment": "blocked: build-rate-limit"
+}

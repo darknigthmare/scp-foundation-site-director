@@ -45,6 +45,37 @@ Les points colorés représentent le personnel. Les pastilles numériques sur le
 
 Une salle sans personnel requis peut exister mais fonctionne mal ou pas du tout. Les files non traitées peuvent expirer et déclencher des pénalités.
 
+### 6.1 Placer et configurer les portes
+
+Sélectionner une salle, puis **Ajouter un accès** dans le panneau **Portes et sas**. Choisir une porte ou un sas, un mur et un emplacement numéroté à partir de 1. Au nord et au sud, les emplacements se comptent de gauche à droite ; à l'est et à l'ouest, de haut en bas. L'aperçu montre le passage avant validation. L'autre côté doit rester dans le complexe et déboucher sur un espace libre ou un couloir. Un mur déjà occupé par un accès ou bloqué par une autre salle refuse l'installation.
+
+| Installation | Crédits | Pièces |
+|---|---:|---:|
+| Porte | 250 | 2 |
+| Sas interverrouillé | 1 000 | 6 |
+
+Les portes incluses dans les salles neuves ou migrées sont gratuites. Une modification de réglages est gratuite. Le démontage rend 35 % des crédits et 40 % des pièces effectivement payés ; un accès inclus ne rapporte rien. Pour changer de type, démonter l'ancien accès puis installer le nouveau.
+
+Chaque accès possède une habilitation minimale de 0 à 5 et un sens : entrée, sortie ou les deux. Les flux actifs du personnel sont personnel général, sécurité/FTM, équipes médicales, logistique et personnel contaminé. Au-delà de 65 % de contamination, ou pendant une quarantaine, le profil contaminé remplace le métier. Les filtres Public et Anomalies sont réservés à des circulations dédiées futures : ils ne créent pas de visiteurs ou de convois dans cette tranche.
+
+Les règles s'appliquent **à chaque passage**. Pour sécuriser toute la salle, configurer ou verrouiller tous ses accès. Un passage alternatif encore autorisé reste utilisable. La suppression de toutes les entrées laisse la salle fermée à la circulation ; le chargement ne recrée pas les portes supprimées volontairement.
+
+### 6.2 Exploiter un sas
+
+Un sas admet une personne à la fois dans l'ordre de sa file, dans les deux sens si sa configuration l'autorise. La file accueille de 1 à 16 personnes en attente, en plus de l'occupant. Une demande expire après 60 minutes simulées et ajoute du stress. Un agent dont la destination ou le service change quitte la file ; un cycle déjà engagé se termine avant la nouvelle tâche.
+
+Le cycle comporte une admission, une égalisation portes fermées, puis une sortie. Les deux portes ne s'ouvrent jamais ensemble. Le compteur augmente seulement après un franchissement terminé. Le panneau indique l'occupant, la phase, la file et le temps restant avant expiration des demandes.
+
+Une coupure électrique locale, une réserve d'énergie insuffisante, un blackout de surface, une coupure d'air ou le verrouillage du sas arrêtent le cycle avec les deux portes fermées. Restaurer les conditions permet la reprise. L'électricité et l'air sont ici des disponibilités de service ; le dessin de réseaux physiques reste une étape ultérieure.
+
+**Évacuer côté d'origine et verrouiller** libère le sas et sa file, replace l'occupant du côté où il est entré et ne compte aucun passage. Cette action permet ensuite de modifier l'emplacement ou les autorisations, ou de démonter le sas. Une salle avec un sas occupé ne peut pas être démolie.
+
+### 6.3 Comprendre un trajet bloqué
+
+La fiche d'un agent indique le motif de son attente : entrée absente, habilitation, profil refusé, passage obstrué, verrouillage ou file du sas. Les itinéraires réagissent aux modifications des accès et des salles. Un agent ne travaille pas dans une salle tant qu'il n'y est pas arrivé ; les soins ciblés attendent également le patient. Les préférences d'animation ne changent pas la vitesse simulée.
+
+Les nouvelles sauvegardes conservent les accès, les demandes et les cycles en cours. Une ancienne sauvegarde compatible reçoit une porte par mur utilisable, près de son centre. Les identifiants et les ressources existants sont conservés.
+
 ## 7. Personnel
 
 Dans **Gestion**, ouvrir le volet Personnel pour recruter. Chaque candidat possède rôle, coût, compétences et traits.
@@ -136,3 +167,4 @@ Conserver régulièrement un export externe avant une modification importante du
 - Former les équipes de nuit, souvent moins nombreuses.
 - Réparer avant qu’une crise ne transforme une panne mineure en brèche.
 - Ne pas négliger la couverture : gagner la crise tout en brisant le Voile peut être une défaite stratégique.
+

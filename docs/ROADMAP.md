@@ -8,6 +8,12 @@ Livré : simulation complète 2.5D, 12 SCP, campagne, bac à sable, personnel, r
 
 ## 1.1 — Operations
 
+Tranche appliquée le 29 octobre 2026 sur la base 1.0.0 : éditeur des portes/sas de surface, habilitations et sens de passage, file FIFO et cycle interverrouillé, gestion des pannes et migration des sauvegardes. Tranche du 30 octobre 2026 : déplacements physiques du personnel souterrain, galeries adjacentes, ascenseurs temporisés, puits consécutifs, habilitations intermédiaires, scellement et itinéraires alternatifs. Les visiteurs/convois autonomes, l'éditeur de portes souterraines et le réseau 3D multi-branches restent à faire. La version complète 1.1 n'est pas déclarée livrée.
+
+Tranche du 30 octobre — **cohérence des trois vues ajoutée** : bâtiments du complexe principal projetés en toiture sur la vue Région à partir du plan réel de Surface ; sélection conservée entre la ville, le plan intérieur et la coupe souterraine ; axe de coupe A-A partagé ; vrais alignements ascenseurs/puits ; parcelle du Site réservée ; conservation des installations régionales d'anciennes sauvegardes. Les annexes extérieures restent des entités à part et non des salles d'intérieur.
+
+**Nouvelle tranche appliquée le 30 octobre :** inspection intérieure dédiée des annexes régionales, avec zones descriptives partageant l’état et l’identité de leur installation extérieure ; coupes souterraines Y multiples, mini-carte X–Y par niveau, galeries inter-coupes et ascenseurs alignés en X/Y ; déplacements transversaux physiques, sauvegardes compatibles (schéma 4) et tests de déviation après scellement. **Reste ouvert :** WebGL véritable, salles d’annexes constructibles et avec personnel, étages de surface, escaliers et éditeur de portes/sas souterrains ; visiteurs/convois autonomes.
+
 - dessin de salles par glisser-déposer et redimensionnement ;
 - portes, sas et sens de circulation ;
 - plans de travail par équipe ;
@@ -16,6 +22,10 @@ Livré : simulation complète 2.5D, 12 SCP, campagne, bac à sable, personnel, r
 - chronologie après action ;
 - vingt nouveaux événements ;
 - dix SCP supplémentaires à forte personnalité systémique.
+
+### Extension Operations — réseaux techniques réels (30 octobre 2026)
+
+Livré sur la PR : circuits indépendants électricité/eau/air le long des jonctions souterraines, nouvelles gaines payantes, vannes d'isolement, alimentation depuis les puits et nœuds énergétiques, ventilation via filtration alimentée, effet réel sur la conformité SCP, la recherche, les sas et les ascenseurs. Migration de sauvegarde schéma 6 sans connexions fictives. Les réseaux physiques de surface et des annexes, la pression volumétrique, l'incendie et les phénomènes de contamination restent à implémenter.
 
 ## 1.2 — Veil
 
@@ -83,3 +93,10 @@ Campagnes alternatives séparées : Voile brisé, division antimémétique, fin 
 ## Multijoueur envisagé
 
 Coopération à deux ou quatre rôles : direction, science, sécurité et logistique. Le serveur reste autoritaire, les décisions critiques peuvent exiger plusieurs validations, et la partie doit rester jouable en solo.
+
+
+### Accès souterrains configurables — tranche incrémentale (30 octobre)
+
+Implémenté sur la PR : portes et sas de jonction X/Y, habilitations et sens, verrouillage en cours de passage avec retour physique, cycle d'égalisation à une seule place, file FIFO, panne énergie/air, évacuation manuelle, comptage, coûts et remboursements plafonnés, migration des anciennes sauvegardes sans conversion forcée des galeries. Les jonctions X/Y et les cages d'ascenseur utilisent les mêmes empreintes physiques que la carte.
+
+Toujours manquant : vraie modélisation volumétrique WebGL, détails 3D éditables des pièces et bâtiments, réseaux physiques d'air/électricité/eau avec pressions, portes par cellules individuelles et transferts d'anomalies autonomes, déplacement d'équipes à travers les annexes et tests natifs Safari/iOS.
