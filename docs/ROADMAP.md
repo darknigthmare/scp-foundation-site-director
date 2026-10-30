@@ -10,6 +10,10 @@ Livré : simulation complète 2.5D, 12 SCP, campagne, bac à sable, personnel, r
 
 Tranche appliquée le 29 octobre 2026 sur la base 1.0.0 : éditeur des portes/sas de surface, habilitations et sens de passage, file FIFO et cycle interverrouillé, gestion des pannes et migration des sauvegardes. Tranche du 30 octobre 2026 : déplacements physiques du personnel souterrain, galeries adjacentes, ascenseurs temporisés, puits consécutifs, habilitations intermédiaires, scellement et itinéraires alternatifs. Les visiteurs/convois autonomes, l'éditeur de portes souterraines et le réseau 3D multi-branches restent à faire. La version complète 1.1 n'est pas déclarée livrée.
 
+Tranche du 30 octobre — **cohérence des trois vues ajoutée** : bâtiments du complexe principal projetés en toiture sur la vue Région à partir du plan réel de Surface ; sélection conservée entre la ville, le plan intérieur et la coupe souterraine ; axe de coupe A-A partagé ; vrais alignements ascenseurs/puits ; parcelle du Site réservée ; conservation des installations régionales d'anciennes sauvegardes. Les annexes extérieures restent des entités à part et non des salles d'intérieur.
+
+**Reste ouvert :** volumes réellement 3D, bâtiments multiples avec intérieurs propres, étages de surface, plusieurs axes de coupe Y, couloirs souterrains branchés sur deux dimensions, escaliers et éditeur de portes/sas souterrains.
+
 - dessin de salles par glisser-déposer et redimensionnement ;
 - portes, sas et sens de circulation ;
 - plans de travail par équipe ;

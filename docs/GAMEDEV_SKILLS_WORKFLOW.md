@@ -113,3 +113,23 @@ Exécution GitHub Actions [41031043683](https://github.com/darknigthmare/scp-fou
 et captures générées. La CI est maintenant fixée sur Ubuntu 24.04, car
 Playwright 1.56 refuse les dépendances Chromium sous Ubuntu 26.04.
 Voir [le rapport QA](qa/2026-10-30/UNDERGROUND_NETWORK.md).
+
+## 30 octobre 2026 — fidélité visuelle et cartographie partagée
+
+Le guide game-ai est appliqué aussi à la fidélité des vues, pas seulement aux
+itinéraires. `src/site-spatial.ts` définit une projection déterministe et
+réversible entre la région et les salles réellement présentes dans GameState.
+La vue Région calcule les toitures depuis `surfaceRooms` ; elle ne copie pas
+la liste de bâtiments dans une sauvegarde parallèle. Les annexes régionales
+restent des équipements extérieurs distincts.
+
+La Surface affiche la coupe A-A ; le Sous-sol ne prétend plus être un plan 3D
+complet et affiche les vraies salles traversées par cette coupe. Les cages
+verticales doivent aboutir dans l'emprise d'un ascenseur au bon axe. Les
+liaisons de sélection passent par les identifiants réels. La parcelle du Site
+est réservée à l'intérieur et les anciennes annexes ne sont pas migrées
+silencieusement. Les tests de géométrie, navigation de vue, construction,
+démolition, sauvegardes et le scénario navigateur complémentaire font partie
+du contrôle de la PR.
+
+Rapport : `docs/qa/2026-10-30/THREE_VIEW_SPATIAL_CONTINUITY.md`.

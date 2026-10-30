@@ -52,6 +52,18 @@ Dans la vue **Sous-sol**, sélectionner un module permet de voir son habilitatio
 
 **Validation :** [92 tests métier et 17 scénarios navigateur réussis le 30 octobre 2026](docs/qa/2026-10-30/UNDERGROUND_NETWORK.md). Le jeu reste basé sur la version 1.0.0 ; la version Operations 1.1 complète n'est pas déclarée livrée.
 
+## Un même Site, trois vues liées — tranche Operations (30 octobre 2026)
+
+**Région / ville :** le bâtiment principal, situé au sud-est de la carte, affiche les **toitures réellement dérivées** de chaque salle du complexe de surface. Les installations régionales distinctes (centrale, dépôt, parking, couverture, voirie) restent des **annexes extérieures**. La parcelle du bâtiment principal est réservée : on construit ses salles dans la vue Surface. Sélectionnez une toiture pour retrouver la même salle, le même identifiant et la même emprise dans l'intérieur du Site. Construire ou démolir une pièce actualise aussitôt sa toiture, sans seconde liste de bâtiments divergente.
+
+**Surface / intérieur :** le plan au sol correspond exactement aux toitures de la vue régionale par une projection isométrique inversible. La ligne jaune **A-A** indique la coupe longitudinale utilisée pour la représentation souterraine. Les puits reliés sont marqués à l'emplacement effectif de leur ascenseur. Le panneau d'une pièce permet d'ouvrir sa toiture dans la vue Région et, si elle traverse l'axe A-A, sa position souterraine.
+
+**Sous-sol :** une bande au-dessus du premier niveau montre les vraies pièces situées sur l'axe A-A. Un puits n'est accessible que si son débouché coïncide **dans la même coupe** avec l'emprise d'un ascenseur de surface actif. Les agents conservent les déplacements physiques et les retours temporisés introduits auparavant. La vue souterraine reste une **coupe 2.5D horizontale et verticale**, et non un volume 3D complet : une pièce de surface hors de A-A n'a volontairement pas de faux module à son aplomb.
+
+**Sauvegardes :** aucun identifiant de salle ni bâtiment miroir n'a été ajouté aux sauvegardes. Les annexes des anciennes parties qui recouperaient exceptionnellement la nouvelle emprise ne sont pas déplacées ni supprimées. Les anciennes parties restent importables selon le schéma de validation actuel.
+
+**Vérification :** 101 tests métier et 18 étapes navigateur Chromium réussis pour le lot fonctionnel, sans erreur console. [Rapport QA des vues liées](docs/qa/2026-10-30/THREE_VIEW_SPATIAL_CONTINUITY.md). La base du jeu demeure **1.0.0** ; cette tranche ne signifie pas que toute la version Operations 1.1 est terminée.
+
 ## Lancement rapide
 
 ### Archive avec le build fourni

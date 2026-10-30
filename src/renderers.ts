@@ -628,7 +628,7 @@ namespace SCPGame {
       ctx.beginPath(); ctx.moveTo(metrics.originX - 14, y); ctx.lineTo(metrics.originX + totalW + 14, y); ctx.stroke();
       ctx.fillStyle = "rgba(217,226,226,.45)";
       ctx.font = "10px system-ui";
-      ctx.fillText(`NIVEAU -${level + 1}`, metrics.originX - 70, y + metrics.levelH / 2 + 3);
+      ctx.fillText(`NIVEAU -${level + 1}`, Math.max(10, metrics.originX - 70), y + metrics.levelH / 2 + 3);
       for (let x = 0; x < state.undergroundWidth; x += 1) {
         if ((x + level * 3) % 7 === 0) {
           ctx.fillStyle = "rgba(120,110,96,.08)";
