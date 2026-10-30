@@ -137,12 +137,12 @@ test("la sauvegarde mid-ascenseur conserve la destination et la progression",()=
   resumed.flags["last-random-event"]=100000;
   resumed.flags["last-work-spawn"]=100000;
   const loaded=resumed.staff.find(m=>m.id===member.id);
-  const dest=resumed.undergroundRooms.find(r=>r.id==="dest");
-  assert.ok(loaded&&dest);
+  const loadedDestination=resumed.undergroundRooms.find(r=>r.id==="dest");
+  assert.ok(loaded&&loadedDestination);
   assert.equal(loaded.assignmentRoomId,"dest");
   assert.equal(loaded.taskProgress,member.taskProgress);
-  for(let i=0;i<100&&!api.staffIsAtUndergroundRoom(loaded,dest);i++) tick(api,resumed);
-  assert.equal(api.staffIsAtUndergroundRoom(loaded,dest),true);
+  for(let i=0;i<100&&!api.staffIsAtUndergroundRoom(loaded,loadedDestination);i++) tick(api,resumed);
+  assert.equal(api.staffIsAtUndergroundRoom(loaded,loadedDestination),true);
 });
 
 test("sceller une galerie bloque les agents et la réouverture les libère",()=>{
