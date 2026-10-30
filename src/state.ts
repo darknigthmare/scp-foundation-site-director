@@ -839,14 +839,6 @@ namespace SCPGame {
       });
     };
 
-    state.surfaceRooms
-      .filter((room) => room.enabled)
-      .sort((a, b) => getSurfaceDefinition(b.type).security - getSurfaceDefinition(a.type).security)
-      .forEach((room) => {
-        const definition = getSurfaceDefinition(room.type);
-        Object.entries(definition.requiredRoles).forEach(([role, count]) => assignRole(room.id, role as StaffRole, count ?? 0, false));
-      });
-
     state.undergroundRooms
       .filter((room) => room.enabled && room.scpId)
       .forEach((room) => {
@@ -854,6 +846,14 @@ namespace SCPGame {
         if (!scp) return;
         const definition = getSCPDefinition(scp.definitionId);
         Object.entries(definition.requirements.staff).forEach(([role, count]) => assignRole(room.id, role as StaffRole, count ?? 0, true));
+      });
+
+    state.surfaceRooms
+      .filter((room) => room.enabled)
+      .sort((a, b) => getSurfaceDefinition(b.type).security - getSurfaceDefinition(a.type).security)
+      .forEach((room) => {
+        const definition = getSurfaceDefinition(room.type);
+        Object.entries(definition.requiredRoles).forEach(([role, count]) => assignRole(room.id, role as StaffRole, count ?? 0, false));
       });
 
     available.filter((member) => !assigned.has(member.id)).forEach((member) => {

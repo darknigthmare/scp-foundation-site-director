@@ -119,7 +119,16 @@ test("panne au milieu de la descente: pause et reprise",()=>{
 });
 
 test("la sauvegarde mid-ascenseur conserve la destination et la progression",()=>{
-  const api=game(),{state,member}=sample(api);
+  const api=game(),{state,member,dest}=sample(api);
+  // On load, real SCP staffing is recomputed, so this is an actual containment
+  // assignment, not an orphaned debug assignment to an empty room.
+  const authentic=api.createNewGame("sandbox","standard",8877);
+  const scp=authentic.scps.find(entry=>entry.definitionId==="scp-173");
+  const procedure=authentic.procedures.find(entry=>entry.scpId==="scp-173");
+  assert.ok(scp&&procedure);
+  scp.contained=true; scp.transferred=true; scp.roomId=dest.id;
+  dest.scpId=scp.id;
+  state.scps=[scp]; state.procedures=[procedure];
   tick(api,state,3);
   assert.equal(member.position.layer,"surface");
   const resumed=api.importSave(JSON.stringify(state));
