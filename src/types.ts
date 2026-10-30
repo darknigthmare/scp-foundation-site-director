@@ -193,6 +193,32 @@ namespace SCPGame {
     accessPoints?: SurfaceAccess[];
   }
 
+  export interface UndergroundGateCycle {
+    staffId: string;
+    fromId: string;
+    toId: string;
+    phase: "equalizing" | "crossing" | "retreating";
+    remaining: number;
+  }
+
+  export interface UndergroundGate {
+    id: string;
+    roomAId: string;
+    roomBId: string;
+    kind: "door" | "airlock";
+    enabled: boolean;
+    minClearance: 0 | 1 | 2 | 3 | 4 | 5;
+    direction: "both" | "a-to-b" | "b-to-a";
+    powered: boolean;
+    airSupply: boolean;
+    queueCapacity: number;
+    queue: string[];
+    cycle?: UndergroundGateCycle;
+    passedCount: number;
+    paidFunds: number;
+    paidParts: number;
+  }
+
   export interface UndergroundRoom {
     id: string;
     type: UndergroundRoomType;
@@ -491,6 +517,8 @@ namespace SCPGame {
     regionFacilities: RegionFacility[];
     surfaceRooms: SurfaceRoom[];
     undergroundRooms: UndergroundRoom[];
+    /** Configured physical junctions; absent on old saves. */
+    undergroundGates?: UndergroundGate[];
     /** Region annex whose derived interior is currently being inspected. */
     activeInteriorFacilityId?: string;
     staff: StaffMember[];

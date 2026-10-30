@@ -90,3 +90,9 @@ Campagnes alternatives séparées : Voile brisé, division antimémétique, fin 
 
 Coopération à deux ou quatre rôles : direction, science, sécurité et logistique. Le serveur reste autoritaire, les décisions critiques peuvent exiger plusieurs validations, et la partie doit rester jouable en solo.
 
+
+### Accès souterrains configurables — tranche incrémentale (30 octobre)
+
+Implémenté sur la PR : portes et sas de jonction X/Y, habilitations et sens, verrouillage en cours de passage avec retour physique, cycle d'égalisation à une seule place, file FIFO, panne énergie/air, évacuation manuelle, comptage, coûts et remboursements plafonnés, migration des anciennes sauvegardes sans conversion forcée des galeries. Les jonctions X/Y et les cages d'ascenseur utilisent les mêmes empreintes physiques que la carte.
+
+Toujours manquant : vraie modélisation volumétrique WebGL, détails 3D éditables des pièces et bâtiments, réseaux physiques d'air/électricité/eau avec pressions, portes par cellules individuelles et transferts d'anomalies autonomes, déplacement d'équipes à travers les annexes et tests natifs Safari/iOS.

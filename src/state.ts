@@ -1,6 +1,6 @@
 namespace SCPGame {
   const CONTAINMENT_ROOM_TAGS = ["safe", "euclid", "keter", "humanoid", "bio", "infohazard", "heavy", "temporal"];
-  const LOAD_SCHEMA_VERSION = 4;
+  const LOAD_SCHEMA_VERSION = 5;
   const SURFACE_ACCESS_SIDES: readonly SurfaceAccessSide[] = ["north", "east", "south", "west"];
   const SURFACE_ACCESS_TRAFFIC: readonly SurfaceTraffic[] = ["public", "staff", "security", "medical", "contaminated", "freight", "anomaly"];
   const SURFACE_ACCESS_COSTS: Record<SurfaceAccess["kind"], { funds: number; parts: number }> = {
@@ -345,6 +345,7 @@ namespace SCPGame {
       regionFacilities: createInitialFacilities(),
       surfaceRooms: createInitialSurfaceRooms(),
       undergroundRooms: createInitialUndergroundRooms(),
+      undergroundGates: [],
       staff: createInitialStaff(seed),
       workItems: [],
       scps,
@@ -798,6 +799,16 @@ namespace SCPGame {
       if (index < 0) return { ok: false, message: "Module introuvable." };
       const room = state.undergroundRooms[index];
       if (room.scpId) return { ok: false, message: "Transférez le SCP avant de démanteler sa cellule." };
+      if ((state.undergroundGates ?? []).some((gate) => gate.cycle && (gate.roomAId === room.id || gate.roomBId === room.id)))
+        return { ok: false, message: "Évacuez les sas actifs avant de démanteler cette galerie." };
+      if (state.staff.some((member) => member.status !== "dead" && member.position.layer === "underground"
+        && (member.position.level ?? member.position.y) === room.level
+        && Math.abs((member.position.sectionY ?? getLegacyUndergroundSectionY(state)) - undergroundRoomSectionY(state, room)) < 0.0001
+        && member.position.x >= room.x && member.position.x <= room.x + room.width))
+        return { ok: false, message: "Évacuez le personnel présent avant de démanteler ce module." };
+      for (const gate of [...state.undergroundGates ?? []]) {
+        if (gate.roomAId === room.id || gate.roomBId === room.id) removeUndergroundGate(state, gate.id);
+      }
       const definition = getUndergroundDefinition(room.type);
       state.undergroundRooms.splice(index, 1);
       addResource(state.resources, "funds", (definition.cost.funds ?? 0) * 0.3);
@@ -1232,6 +1243,29 @@ namespace SCPGame {
       }
       return true;
     };
+    const undergroundGateCycle: Check = (value) => shape(value, {
+      staffId: id, fromId: id, toId: id,
+      phase: oneOf(["equalizing", "crossing", "retreating"]), remaining: integer(0, 4)
+    }, ["staffId", "fromId", "toId", "phase", "remaining"]);
+    const undergroundGate: Check = (value) => {
+      if (!shape(value, {
+        id, roomAId: id, roomBId: id, kind: oneOf(["door", "airlock"]), enabled: boolean,
+        minClearance: integer(0, 5), direction: oneOf(["both", "a-to-b", "b-to-a"]),
+        powered: boolean, airSupply: boolean, queueCapacity: integer(1, 8),
+        queue: array(id), cycle: undergroundGateCycle, passedCount: integer(0),
+        paidFunds: finite, paidParts: finite
+      }, ["id", "roomAId", "roomBId", "kind", "enabled", "minClearance", "direction", "powered", "airSupply",
+        "queueCapacity", "queue", "passedCount", "paidFunds", "paidParts"]) || !record(value)) return false;
+      const cost = UNDERGROUND_GATE_COSTS[value.kind as "door" | "airlock"];
+      return value.roomAId !== value.roomBId && (value.queue as string[]).length <= Number(value.queueCapacity)
+        && new Set(value.queue as string[]).size === (value.queue as string[]).length
+        && (value.kind === "airlock" || ((value.queue as string[]).length === 0
+          && (!value.cycle || (value.cycle as UndergroundGateCycle).phase !== "equalizing")))
+        && Number(value.paidFunds) >= 0 && Number(value.paidFunds) <= cost.funds
+        && Number(value.paidParts) >= 0 && Number(value.paidParts) <= cost.parts
+        && (!value.cycle || (value.cycle as UndergroundGateCycle).phase === "equalizing"
+          || (value.cycle as UndergroundGateCycle).remaining === 0);
+    };
     const undergroundRoom: Check = (value) => {
       if (!shape(value, {
         id, type: oneOf(UNDERGROUND_ROOM_DEFINITIONS.map((entry) => entry.type)),
@@ -1321,6 +1355,7 @@ namespace SCPGame {
       }),
       resources: (value) => numericRecord(value), reputation: (value) => numericRecord(value),
       regionFacilities: array(facility), surfaceRooms: array(surfaceRoom), undergroundRooms: array(undergroundRoom),
+      undergroundGates: array(undergroundGate),
       staff: array(member), workItems: array(workItem), scps: array(scp), procedures: array(procedure),
       researchNodes: array((value) => shape(value, { id, completed: boolean }, ["id"])), events: array(event),
       campaign: array(chapter), notifications: array(notification), history: stringArray,
@@ -1409,6 +1444,7 @@ namespace SCPGame {
       regionFacilities: arrayValue<RegionFacility>(raw.regionFacilities, defaults.regionFacilities),
       surfaceRooms: arrayValue<SurfaceRoom>(raw.surfaceRooms, defaults.surfaceRooms),
       undergroundRooms: arrayValue<UndergroundRoom>(raw.undergroundRooms, defaults.undergroundRooms),
+      undergroundGates: arrayValue<UndergroundGate>(raw.undergroundGates, []),
       staff: arrayValue<StaffMember>(raw.staff, defaults.staff),
       workItems: arrayValue<WorkItem>(raw.workItems, defaults.workItems),
       scps: arrayValue<SCPInstance>(raw.scps, defaults.scps),
@@ -1476,6 +1512,40 @@ namespace SCPGame {
       const tags = getUndergroundDefinition(room.type).tags;
       room.powerPriority = room.powerPriority ?? (tags.includes("keter") || tags.includes("bio") ? 3 : 2);
     });
+    // An old save without gates remains an open physical corridor. Explicit
+    // gates are checked against actual adjacent modules, not just string IDs.
+    const memberById = new Map(state.staff.map((member) => [member.id, member]));
+    const gateIds = new Set<string>();
+    const gateEdges = new Set<string>();
+    const waitingIds = new Set<string>();
+    for (const gate of state.undergroundGates ?? []) {
+      const from = state.undergroundRooms.find((room) => room.id === gate.roomAId);
+      const to = state.undergroundRooms.find((room) => room.id === gate.roomBId);
+      const key = [gate.roomAId, gate.roomBId].sort().join(':');
+      if (gateIds.has(gate.id) || gateEdges.has(key) || !from || !to
+        || from.level !== to.level || !undergroundRoomsTouch(state, from, to)) return undefined;
+      gateIds.add(gate.id);
+      gateEdges.add(key);
+      for (const id of [...gate.queue, ...(gate.cycle ? [gate.cycle.staffId] : [])]) {
+        const member = memberById.get(id);
+        if (!member || member.status === 'dead' || member.position.layer !== 'underground'
+          || waitingIds.has(id)) return undefined;
+        waitingIds.add(id);
+      }
+      if (gate.cycle) {
+        const cycle = gate.cycle;
+        const occupant = memberById.get(cycle.staffId)!;
+        if (!((cycle.fromId === from.id && cycle.toId === to.id)
+          || (cycle.fromId === to.id && cycle.toId === from.id))
+          || (occupant.position.level ?? occupant.position.y) !== from.level
+          || occupant.position.x < Math.min(from.x, to.x) - 0.0001
+          || occupant.position.x > Math.max(from.x + from.width, to.x + to.width) + 0.0001
+          || (occupant.position.sectionY ?? getLegacyUndergroundSectionY(state))
+            < Math.min(undergroundRoomSectionY(state, from), undergroundRoomSectionY(state, to)) - 0.0001
+          || (occupant.position.sectionY ?? getLegacyUndergroundSectionY(state))
+            > Math.max(undergroundRoomSectionY(state, from), undergroundRoomSectionY(state, to)) + 0.0001) return undefined;
+      }
+    }
     const roomIds = new Set(state.undergroundRooms.map((room) => room.id));
     for (const member of state.staff) {
       const link = member.undergroundLink;

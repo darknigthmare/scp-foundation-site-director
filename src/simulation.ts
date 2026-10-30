@@ -218,6 +218,32 @@ namespace SCPGame {
     const wasTarget = member.target?.layer === "underground" && member.targetRoomId === intentId
       && member.target.x === nextPoint.x && member.target.level === next.level
       && member.target.sectionY === nextPoint.sectionY;
+    // Explicit airlock: queue at the origin center and equalize before the
+    // physical edge traversal. Gates belong to an edge, not to an entire room.
+    const gate = origin !== next ? getUndergroundGateBetween(state, origin, next) : undefined;
+    if (gate && origin.level === next.level) {
+      if (Math.abs(member.position.x - originPoint.x) > 0.0001) {
+        member.target = originPoint;
+        member.targetRoomId = intentId;
+        moveUndergroundX(member, originPoint.x);
+        undergroundTransitStatus(member);
+        return false;
+      }
+      member.target = nextPoint;
+      member.targetRoomId = intentId;
+      if (gate.kind === "airlock") requestUndergroundGate(state, gate, member, origin, next);
+      else if (!gate.cycle) {
+        // A door also reserves the physical edge until the traveller clears
+        // its threshold. This prevents a late lock from admitting half a step.
+        gate.cycle = { staffId: member.id, fromId: origin.id,
+          toId: next.id, phase: 'crossing', remaining: 0 };
+        undergroundTransitStatus(member);
+      } else {
+        member.status = 'queued';
+        member.routeBlockedReason = 'Porte occupée — attente de franchissement';
+      }
+      return false;
+    }
     undergroundTransitStatus(member);
     member.path = route.slice(1).map(undergroundRoomCenter);
     member.pathIndex = 0;
@@ -562,6 +588,7 @@ namespace SCPGame {
       return sum + getSCPDefinition(scp.definitionId).moraleEffect;
     }, 0);
 
+    maintainUndergroundGates(state);
     state.staff.forEach((member) => {
       if (member.status === "dead") return;
       // Once admitted, finish or safely evacuate this one-edge transit before
@@ -574,6 +601,11 @@ namespace SCPGame {
         return;
       }
       if (processPartialSurfaceAccessStep(state, member)) {
+        member.needs.hunger = clamp(member.needs.hunger + 0.022, 0, 100);
+        member.needs.fatigue = clamp(member.needs.fatigue + 0.018, 0, 100);
+        return;
+      }
+      if (member.position.layer === "underground" && processUndergroundGateCycle(state, member)) {
         member.needs.hunger = clamp(member.needs.hunger + 0.022, 0, 100);
         member.needs.fatigue = clamp(member.needs.fatigue + 0.018, 0, 100);
         return;

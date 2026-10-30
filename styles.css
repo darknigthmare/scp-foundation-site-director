@@ -2398,3 +2398,12 @@ kbd {
   color: var(--text);
   background: var(--panel);
 }
+
+/* Underground junction controls share the same compact button rhythm as the
+   surface access editor; interactive on keyboard, tablet and mouse. */
+.underground-gates { margin-block: 12px; }
+.underground-gate-row { padding: 10px 0; border-top: 1px solid rgba(165,198,195,.24); }
+.underground-gate-row strong { display: block; font-size: .92rem; }
+.underground-gate-row small { display: block; opacity: .75; margin: 3px 0 6px; }
+.underground-gate-row .action-row { display:flex; flex-wrap:wrap; gap:5px; margin-block:5px; }
+.underground-gate-row .action-row button { flex:1 1 110px; min-height:32px; font-size: .78rem; }

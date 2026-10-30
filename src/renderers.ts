@@ -747,6 +747,25 @@ namespace SCPGame {
         ctx.fillText(undergroundRoomSectionY(state, other) > cut ? "↓" : "↑", x - 5, y);
       }
     }
+    // A gate remains visible even when locked, unlike a missing corridor.
+    for (const gate of state.undergroundGates ?? []) {
+      const a = visibleRooms.find((room) => room.id === gate.roomAId);
+      const b = visibleRooms.find((room) => room.id === gate.roomBId);
+      if (!a || !b || a.level !== b.level) continue;
+      const boundary = a.x + a.width === b.x ? b.x : b.x + b.width === a.x ? a.x : (Math.max(a.x, b.x) + Math.min(a.x + a.width, b.x + b.width)) / 2;
+      const x = metrics.originX + boundary * metrics.cellW;
+      const y = metrics.originY + a.level * metrics.levelH + metrics.levelH * .48;
+      const open = canTraverseUndergroundGate(state, a, b);
+      ctx.save();
+      ctx.fillStyle = open ? (gate.kind === 'airlock' ? '#eccf87' : '#9ed6c9') : '#e57372';
+      ctx.strokeStyle = '#172a30'; ctx.lineWidth = 1.3;
+      ctx.fillRect(x - 5, y - 9, 10, 18); ctx.strokeRect(x - 5, y - 9, 10, 18);
+      if (gate.kind === 'airlock') {
+        ctx.beginPath(); ctx.moveTo(x - 2, y - 6); ctx.lineTo(x - 2, y + 6);
+        ctx.moveTo(x + 2, y - 6); ctx.lineTo(x + 2, y + 6); ctx.stroke();
+      }
+      ctx.restore();
+    }
     drawUndergroundStaff(ctx, runtime, metrics);
     drawUndergroundPlanInset(runtime, width);
 

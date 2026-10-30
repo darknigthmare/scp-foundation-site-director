@@ -33,11 +33,10 @@ namespace SCPGame {
       y: room.level, level: room.level, sectionY: undergroundRoomSectionY(state, room) };
   }
 
-  export function areUndergroundRoomsConnected(left: UndergroundRoom, right: UndergroundRoom,
-    state?: GameState): boolean {
-    if (!canStaffEnterUndergroundRoom(left) || !canStaffEnterUndergroundRoom(right)) return false;
-    const ly = state ? undergroundRoomSectionY(state, left) : left.y ?? 14;
-    const ry = state ? undergroundRoomSectionY(state, right) : right.y ?? 14;
+  export function undergroundRoomsTouch(state: GameState, left: UndergroundRoom, right: UndergroundRoom): boolean {
+    if (left.id === right.id) return false;
+    const ly = undergroundRoomSectionY(state, left);
+    const ry = undergroundRoomSectionY(state, right);
     if (left.level === right.level) {
       // Same longitudinal row: cells must share a wall, not a proximity gap.
       if (ly === ry) return left.x + left.width === right.x || right.x + right.width === left.x;
@@ -48,6 +47,16 @@ namespace SCPGame {
     return left.type === "elevator-shaft" && right.type === "elevator-shaft"
       && Math.abs(left.level - right.level) === 1 && ly === ry
       && left.x === right.x && left.width === right.width;
+  }
+
+  export function areUndergroundRoomsConnected(left: UndergroundRoom, right: UndergroundRoom,
+    state?: GameState): boolean {
+    if (!canStaffEnterUndergroundRoom(left) || !canStaffEnterUndergroundRoom(right)) return false;
+    if (!state) {
+      const legacy = { surfaceHeight: 17 } as GameState;
+      return undergroundRoomsTouch(legacy, left, right);
+    }
+    return canTraverseUndergroundGate(state, left, right);
   }
 
   function routeTravelCost(state: GameState, left: UndergroundRoom, right: UndergroundRoom): number {
@@ -95,7 +104,7 @@ namespace SCPGame {
       }
       visited.add(current.id);
       for (const neighbour of rooms) {
-        if (visited.has(neighbour.id) || !areUndergroundRoomsConnected(current, neighbour, state)) continue;
+        if (visited.has(neighbour.id) || !canTraverseUndergroundGate(state, current, neighbour, member)) continue;
         const candidate = best + routeTravelCost(state, current, neighbour);
         if (candidate < (distance.get(neighbour.id) ?? Infinity)) {
           distance.set(neighbour.id, candidate);

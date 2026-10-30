@@ -17,6 +17,7 @@
     "src/utils.ts",
     "src/access.ts",
     "src/site-spatial.ts",
+    "src/underground-gates.ts",
     "src/underground-navigation.ts",
     "src/state.ts",
     "src/simulation.ts",

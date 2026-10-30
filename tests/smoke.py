@@ -189,6 +189,28 @@ def run():
                 page.screenshot(path=str(OUT / "underground-network.png"), full_page=True)
             step("habilitation, liaison et scellement du souterrain", underground_network_panel)
 
+            def underground_gate_ui():
+                panel = page.locator("#right-panel")
+                expect(panel).to_contain_text("Portes et sas souterrains")
+                install = panel.locator('button[data-action="add-underground-airlock"]').first
+                expect(install).to_be_visible()
+                install.click()
+                gate = panel.locator('.underground-gate-row:has(button[data-action="underground-gate-lock"])').first
+                expect(gate).to_contain_text("Sas")
+                expect(gate).to_contain_text("habilitation")
+                gate.locator('button[data-action="underground-gate-lock"]').click()
+                expect(gate).to_contain_text("Verrouillé")
+                gate.locator('button[data-action="underground-gate-lock"]').click()
+                expect(gate).to_contain_text("disponible")
+                gate.locator('button[data-action="underground-gate-direction"]').click()
+                expect(gate).to_contain_text("Sens :")
+                gate.locator('button[data-action="underground-gate-power"]').click()
+                expect(gate).to_contain_text("Panne électrique")
+                gate.locator('button[data-action="underground-gate-power"]').click()
+                expect(gate).to_contain_text("disponible")
+                page.screenshot(path=str(OUT / "underground-airlock.png"), full_page=True)
+            step("sas souterrain réel : installation, verrouillage, sens et alimentation", underground_gate_ui)
+
             def coherent_three_views():
                 panel = page.locator("#right-panel")
                 expect(panel).to_contain_text("À l'aplomb")

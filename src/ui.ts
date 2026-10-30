@@ -533,6 +533,43 @@ namespace SCPGame {
     </section>`;
   }
 
+  function renderUndergroundGatePanel(state: GameState, selected: UndergroundRoom): string {
+    const neighbours = state.undergroundRooms.filter((room) => room.id !== selected.id
+      && room.level === selected.level && undergroundRoomsTouch(state, selected, room))
+      .sort((a, b) => undergroundRoomSectionY(state, a) - undergroundRoomSectionY(state, b) || a.x - b.x);
+    const existing = (state.undergroundGates ?? []).filter((gate) => gate.roomAId === selected.id || gate.roomBId === selected.id);
+    if (!neighbours.length && !existing.length)
+      return `<section class="summary-card"><h3>Portes et sas souterrains</h3><p class="hint">Aucune cloison voisine : construisez une galerie contiguë sur l'axe X ou Y.</p></section>`;
+    const entries = neighbours.map((room) => {
+      const gate = getUndergroundGateBetween(state, selected, room);
+      const label = escapeHtml(getUndergroundDefinition(room.type).name);
+      const position = `X=${room.x}, Y=${undergroundRoomSectionY(state, room)}, -${room.level + 1}`;
+      const direction = gate ? gate.direction === 'both' ? 'Double sens'
+        : gate.direction === 'a-to-b' ? `Sens : ${escapeHtml(getUndergroundDefinition(state.undergroundRooms.find((r) => r.id === gate.roomAId)!.type).name)} → B`
+          : `Sens : B → A` : '';
+      if (!gate) return `<div class="underground-gate-row"><strong>${label}</strong><small>${position} · passage ouvert (ancien réseau)</small>
+        <div class="action-row"><button data-action="add-underground-door" data-room="${selected.id}" data-other="${room.id}">Installer porte (650)</button>
+        <button data-action="add-underground-airlock" data-room="${selected.id}" data-other="${room.id}">Installer sas (2 600)</button></div></div>`;
+      const locked = !gate.enabled || !canTraverseUndergroundGate(state, selected, room);
+      const passengers = gate.queue.map((id) => state.staff.find((m) => m.id === id)?.name || id).join(', ');
+      const occupant = gate.cycle ? state.staff.find((m) => m.id === gate.cycle?.staffId)?.name || gate.cycle.staffId : '';
+      return `<div class="underground-gate-row"><strong>${gate.kind === 'airlock' ? 'Sas' : 'Porte'} — ${label}</strong>
+        <small>${position} · ${direction} · habilitation ${gate.minClearance} · franchissements ${gate.passedCount}</small>
+        <p class="hint" role="status">${locked ? 'Accès restreint · ' : ''}${escapeHtml(getUndergroundGateStatus(state, gate))}${occupant ? ` · occupant : ${escapeHtml(occupant)}` : ''}${passengers ? ` · file : ${escapeHtml(passengers)}` : ''}</p>
+        <div class="action-row"><button data-action="underground-gate-lock" data-gate="${gate.id}">${gate.enabled ? 'Verrouiller' : 'Déverrouiller'}</button>
+        <button data-action="underground-gate-clearance" data-gate="${gate.id}" data-delta="-1" ${gate.minClearance <= 0 ? 'disabled' : ''}>Habilitation −</button>
+        <button data-action="underground-gate-clearance" data-gate="${gate.id}" data-delta="1" ${gate.minClearance >= 5 ? 'disabled' : ''}>Habilitation +</button></div>
+        <div class="action-row"><button data-action="underground-gate-direction" data-gate="${gate.id}">Sens : ${gate.direction === 'both' ? '↔' : gate.direction === 'a-to-b' ? 'A → B' : 'B → A'}</button>
+        ${gate.kind === 'airlock' ? `<button data-action="underground-gate-power" data-gate="${gate.id}">Énergie ${gate.powered ? 'ON' : 'OFF'}</button>
+        <button data-action="underground-gate-air" data-gate="${gate.id}">Air ${gate.airSupply ? 'OK' : 'NOK'}</button>
+        <button data-action="underground-gate-evacuate" data-gate="${gate.id}">Évacuer</button>` : ''}
+        <button data-action="underground-gate-remove" data-gate="${gate.id}">Démonter</button></div>
+      </div>`;
+    }).join('');
+    return `<section class="summary-card underground-gates"><h3>Portes et sas souterrains</h3>
+      <p class="hint">Accès installés sur les vraies liaisons X/Y. Sens A↔B selon le côté où le sas a été posé. Un sas ne laisse passer qu'un agent à la fois (file FIFO, égalisation et pannes).</p>${entries}</section>`;
+  }
+
   function renderUndergroundPanel(state: GameState): string {
     const selected = state.selectedType === "underground-room" ? state.undergroundRooms.find((entry) => entry.id === state.selectedId) : undefined;
     if (selected) {
@@ -559,6 +596,7 @@ namespace SCPGame {
         <button class="wide-button" data-view="surface">Voir la salle ou le terrain au-dessus</button>
         <button class="wide-button" data-view="region">Voir la position dans la ville</button>
         <button class="wide-button" data-action="toggle-underground-seal" data-room="${escapeHtml(selected.id)}">${selected.sealed ? "Rouvrir le secteur" : "Sceller le secteur"}</button>
+        ${renderUndergroundGatePanel(state, selected)}
         <hr>
         ${renderBuildCatalog(state, "underground")}
       `;
@@ -1145,6 +1183,37 @@ namespace SCPGame {
         else result = { ok: false, message: "Zone de l'annexe introuvable." };
         break;
       }
+      case "add-underground-door": result = installUndergroundGate(state, String(target.dataset.room), String(target.dataset.other), 'door'); break;
+      case "add-underground-airlock": result = installUndergroundGate(state, String(target.dataset.room), String(target.dataset.other), 'airlock'); break;
+      case "underground-gate-lock": {
+        const gate = (state.undergroundGates ?? []).find((item) => item.id === target.dataset.gate);
+        result = gate ? configureUndergroundGate(state, gate.id, { enabled: !gate.enabled })
+          : { ok: false, message: 'Accès introuvable.' }; break;
+      }
+      case "underground-gate-clearance": {
+        const gate = (state.undergroundGates ?? []).find((item) => item.id === target.dataset.gate);
+        const value = gate ? gate.minClearance + Number(target.dataset.delta) : -1;
+        result = gate ? configureUndergroundGate(state, gate.id, { minClearance: value as UndergroundGate['minClearance'] })
+          : { ok: false, message: 'Accès introuvable.' }; break;
+      }
+      case "underground-gate-direction": {
+        const gate = (state.undergroundGates ?? []).find((item) => item.id === target.dataset.gate);
+        const direction = gate?.direction === 'both' ? 'a-to-b' : gate?.direction === 'a-to-b' ? 'b-to-a' : 'both';
+        result = gate ? configureUndergroundGate(state, gate.id, { direction })
+          : { ok: false, message: 'Accès introuvable.' }; break;
+      }
+      case "underground-gate-power": {
+        const gate = (state.undergroundGates ?? []).find((item) => item.id === target.dataset.gate);
+        result = gate ? configureUndergroundGate(state, gate.id, { powered: !gate.powered })
+          : { ok: false, message: 'Accès introuvable.' }; break;
+      }
+      case "underground-gate-air": {
+        const gate = (state.undergroundGates ?? []).find((item) => item.id === target.dataset.gate);
+        result = gate ? configureUndergroundGate(state, gate.id, { airSupply: !gate.airSupply })
+          : { ok: false, message: 'Accès introuvable.' }; break;
+      }
+      case "underground-gate-remove": result = removeUndergroundGate(state, String(target.dataset.gate)); break;
+      case "underground-gate-evacuate": result = evacuateUndergroundGate(state, String(target.dataset.gate)); break;
       case "toggle-underground-seal": {
         const room = state.undergroundRooms.find((entry) => entry.id === target.dataset.room);
         result = room ? setUndergroundSeal(state, room.id, !room.sealed)
