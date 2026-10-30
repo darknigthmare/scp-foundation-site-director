@@ -1,3 +1,12 @@
+## Operations — réseau souterrain électricité, eau, ventilation (30 octobre 2026, base 1.0.0)
+
+- Trois infrastructures physiques indépendantes par liaison de salles X/Y/profondeur.
+- Gaine installable (850 crédits / 4 pièces), vannes individuelles, démolition et remboursement borné.
+- Électricité depuis les ascenseurs de surface et batteries locales, eau depuis les puits, ventilation des puits et filtres souterrains alimentés.
+- Répercussions opérationnelles : conformité et risque SCP, recherche, sas interverrouillés et ascenseurs.
+- Migration du schéma de sauvegarde 6, sauvegarde des coupures, rejet des références de conduites incohérentes.
+- Diagnostics et barres de couleur sur les modules, tests métier et scénario Chromium dédié.
+
 ## Operations — portes et sas souterrains (30 octobre 2026, base 1.0.0)
 
 - Portes et sas individuels installables sur les jonctions réelles X/Y du sous-sol.

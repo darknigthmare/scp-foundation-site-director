@@ -23,7 +23,12 @@ function fixture(api, crossing = 'x', twoStaff = false, actualScp = false) {
   const state = api.createNewGame('sandbox', 'standard', 9082);
   const a = room('hall-a', 'service-tunnel', 5, 14, 3);
   const b = room('cell-b', 'safe-containment', crossing === 'x' ? 8 : 5, crossing === 'x' ? 14 : 15, 3);
-  state.undergroundRooms = [a, b];
+  // A real supply circuit: emergency battery -> filter -> hall -> cell.
+  // Gate tests must not depend on invented global air/electrical service.
+  const battery = room('battery', 'power-node', 3, 14, 2);
+  const filter = room('filter', 'air-filtration', 1, 14, 2);
+  state.undergroundRooms = [filter, battery, a, b];
+  state.undergroundConduits = api.createLegacyUndergroundConduits(state);
   const guards = state.staff.filter(m => m.role === 'guard').slice(0, twoStaff ? 2 : 1);
   assert.equal(guards.length, twoStaff ? 2 : 1);
   state.staff = guards;
@@ -196,7 +201,7 @@ test('les références de sas forgées, les cycles hors réseau et le schéma fu
   assert.equal(corrupt(v=>{v.undergroundGates[0].minClearance=7;}),undefined);
   assert.equal(corrupt(v=>{v.undergroundGates[0].queue=['missing-staff'];}),undefined);
   assert.equal(corrupt(v=>{v.undergroundGates.push({...v.undergroundGates[0],id:'duplicate'});}),undefined);
-  assert.equal(corrupt(v=>{v.flags['load-schema-version']=6;}),undefined);
+  assert.equal(corrupt(v=>{v.flags['load-schema-version']=7;}),undefined);
   assert.equal(g.importSave(original)?.undergroundGates?.length,1);
 });
 

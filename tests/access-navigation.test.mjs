@@ -40,6 +40,7 @@ function setup(kind = "door") {
   state.staff = [member];
   state.surfaceRooms = [destination];
   state.undergroundRooms = [];
+  state.undergroundConduits = [];
   state.regionFacilities = [];
   state.scps = [];
   state.procedures = [];

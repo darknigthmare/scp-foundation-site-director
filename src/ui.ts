@@ -570,11 +570,37 @@ namespace SCPGame {
       <p class="hint">Accès installés sur les vraies liaisons X/Y. Sens A↔B selon le côté où le sas a été posé. Un sas ne laisse passer qu'un agent à la fois (file FIFO, égalisation et pannes).</p>${entries}</section>`;
   }
 
+  function renderUndergroundUtilityPanel(state: GameState, selected: UndergroundRoom): string {
+    const connected = state.undergroundRooms.filter((room) => room.id !== selected.id
+      && undergroundRoomsTouch(state, selected, room));
+    const status = getUndergroundUtilityStatus(state, selected);
+    const tags = (name: string, ok: boolean): string => `<span class="utility-indicator ${ok ? "utility-online" : "utility-offline"}">${name} : ${ok ? "Raccordé" : "Hors service"}</span>`;
+    const entries = connected.map((other) => {
+      const line = getUndergroundConduitBetween(state, selected, other);
+      const name = escapeHtml(getUndergroundDefinition(other.type).name);
+      const attrs = `data-room="${escapeHtml(selected.id)}" data-other="${escapeHtml(other.id)}"`;
+      if (!line) return `<div class="utility-circuit-row"><strong>${name}</strong>
+        <p class="hint">Réseau absent · X=${other.x}, Y=${undergroundRoomSectionY(state, other)}, profondeur ${other.level + 1}</p>
+        <button data-action="underground-conduit-install" ${attrs}>Poser une gaine (850 crédits · 4 pièces)</button></div>`;
+      const indicators = (["power", "water", "air"] as UndergroundUtilityKind[])
+        .map((kind) => `<button data-action="underground-conduit-toggle" ${attrs} data-kind="${kind}" aria-pressed="${line[kind]}">${kind === "power" ? "Électricité" : kind === "water" ? "Eau" : "Air"} : ${line[kind] ? "Ouvert" : "Isolé"}</button>`).join("");
+      return `<div class="utility-circuit-row"><strong>${name}</strong><div class="action-row">${indicators}</div>
+        <button data-action="underground-conduit-remove" ${attrs}>Démonter la gaine</button></div>`;
+    }).join("");
+    return `<section class="summary-card underground-utilities" aria-label="Réseaux techniques du sous-sol">
+      <h3>Réseaux techniques physiques</h3>
+      <div class="utility-status">${tags("Électricité", status.power)}${tags("Eau", status.water)}${tags("Ventilation", status.air)}</div>
+      <p class="hint">Câbles, conduites et gaines entre modules adjacents. Les nouveaux modules exigent un raccordement. Les anciennes galeries conservent leurs liaisons historiques. Les vannes sont indépendantes des portes de personnel.</p>
+      ${entries || '<p class="hint">Aucune paroi technique voisine.</p>'}
+    </section>`;
+  }
+
   function renderUndergroundPanel(state: GameState): string {
     const selected = state.selectedType === "underground-room" ? state.undergroundRooms.find((entry) => entry.id === state.selectedId) : undefined;
     if (selected) {
       const definition = getUndergroundDefinition(selected.type);
       const scp = selected.scpId ? state.scps.find((entry) => entry.id === selected.scpId) : undefined;
+      const supplies = getUndergroundUtilityStatus(state, selected);
       return `
         ${renderUndergroundSliceControls(state)}
         ${renderSelectionHeader(definition.icon, definition.name, `Niveau -${selected.level + 1} · coupe ${undergroundRoomSectionY(state, selected)}`)}
@@ -587,6 +613,9 @@ namespace SCPGame {
           ["Habilitation", `Niveau ${getUndergroundClearanceRequirement(selected)}`],
           ["Ascenseur", hasUndergroundElevatorConnection(state, selected) ? "Relié" : "Non relié"],
           ["Galerie", selected.sealed ? "Scellée" : "Ouverte"],
+          ["Électricité", supplies.power ? "Alimentée" : "Non raccordée"],
+          ["Eau", supplies.water ? "Distribuée" : "Coupée"],
+          ["Air", supplies.air ? "Ventilé" : "Isolé"],
           ["À l'aplomb", getSurfaceRoomAboveUnderground(state, selected)
             ? getSurfaceDefinition(getSurfaceRoomAboveUnderground(state, selected)!.type).name : "Terrain sans pièce"],
           ["Coupe", `Y=${undergroundRoomSectionY(state, selected)} / ${state.surfaceHeight - 1}`]
@@ -597,6 +626,7 @@ namespace SCPGame {
         <button class="wide-button" data-view="region">Voir la position dans la ville</button>
         <button class="wide-button" data-action="toggle-underground-seal" data-room="${escapeHtml(selected.id)}">${selected.sealed ? "Rouvrir le secteur" : "Sceller le secteur"}</button>
         ${renderUndergroundGatePanel(state, selected)}
+        ${renderUndergroundUtilityPanel(state, selected)}
         <hr>
         ${renderBuildCatalog(state, "underground")}
       `;
@@ -1185,6 +1215,12 @@ namespace SCPGame {
       }
       case "add-underground-door": result = installUndergroundGate(state, String(target.dataset.room), String(target.dataset.other), 'door'); break;
       case "add-underground-airlock": result = installUndergroundGate(state, String(target.dataset.room), String(target.dataset.other), 'airlock'); break;
+      case "underground-conduit-install": result = installUndergroundConduit(state,
+        String(target.dataset.room), String(target.dataset.other)); break;
+      case "underground-conduit-toggle": result = toggleUndergroundConduit(state,
+        String(target.dataset.room), String(target.dataset.other), target.dataset.kind as UndergroundUtilityKind); break;
+      case "underground-conduit-remove": result = removeUndergroundConduit(state,
+        String(target.dataset.room), String(target.dataset.other)); break;
       case "underground-gate-lock": {
         const gate = (state.undergroundGates ?? []).find((item) => item.id === target.dataset.gate);
         result = gate ? configureUndergroundGate(state, gate.id, { enabled: !gate.enabled })

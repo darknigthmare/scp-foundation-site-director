@@ -1880,7 +1880,8 @@ var SCPGame;
     }
     SCPGame.rectanglesOverlap = rectanglesOverlap;
     function undergroundOverlap(a, b) {
-        return a.level === b.level && a.x < b.x + b.width && a.x + a.width > b.x;
+        return a.level === b.level && (a.y ?? 14) === (b.y ?? 14)
+            && a.x < b.x + b.width && a.x + a.width > b.x;
     }
     SCPGame.undergroundOverlap = undergroundOverlap;
     function deepClone(value) {
@@ -2416,8 +2417,756 @@ var SCPGame;
 })(SCPGame || (SCPGame = {}));
 var SCPGame;
 (function (SCPGame) {
+    function getSiteRegionFootprint(state) {
+        // Le complexe principal se situe au sud-est de l'agglomération, distinct
+        // des annexes régionales déjà construites. La zone est réservée à ce Site.
+        const width = Math.min(9, Math.max(1, state.regionWidth - 1));
+        const height = Math.min(5, Math.max(1, state.regionHeight - 1));
+        return {
+            x: Math.max(0, state.regionWidth - width - 1),
+            y: Math.max(0, state.regionHeight - height),
+            width, height
+        };
+    }
+    SCPGame.getSiteRegionFootprint = getSiteRegionFootprint;
+    function surfaceToRegionPosition(state, point) {
+        const bounds = getSiteRegionFootprint(state);
+        return {
+            x: bounds.x + point.x * bounds.width / state.surfaceWidth,
+            y: bounds.y + point.y * bounds.height / state.surfaceHeight
+        };
+    }
+    SCPGame.surfaceToRegionPosition = surfaceToRegionPosition;
+    function regionToSurfacePosition(state, point) {
+        const bounds = getSiteRegionFootprint(state);
+        if (point.x < bounds.x || point.y < bounds.y || point.x >= bounds.x + bounds.width || point.y >= bounds.y + bounds.height)
+            return undefined;
+        return {
+            x: (point.x - bounds.x) * state.surfaceWidth / bounds.width,
+            y: (point.y - bounds.y) * state.surfaceHeight / bounds.height
+        };
+    }
+    SCPGame.regionToSurfacePosition = regionToSurfacePosition;
+    function getSurfaceRegionFootprint(state, room) {
+        const origin = surfaceToRegionPosition(state, room);
+        const end = surfaceToRegionPosition(state, { x: room.x + room.width, y: room.y + room.height });
+        return { x: origin.x, y: origin.y, width: end.x - origin.x, height: end.y - origin.y };
+    }
+    SCPGame.getSurfaceRegionFootprint = getSurfaceRegionFootprint;
+    function getSurfaceRoomAtRegionPosition(state, point) {
+        const local = regionToSurfacePosition(state, point);
+        if (!local)
+            return undefined;
+        return [...state.surfaceRooms].reverse().find((room) => room.type !== "corridor" && SCPGame.pointInRect(local, room.x, room.y, room.width, room.height))
+            ?? [...state.surfaceRooms].reverse().find((room) => SCPGame.pointInRect(local, room.x, room.y, room.width, room.height));
+    }
+    SCPGame.getSurfaceRoomAtRegionPosition = getSurfaceRoomAtRegionPosition;
+    /** Historical Y=14 section of the original single-axis underground map. */
+    function getLegacyUndergroundSectionY(state) {
+        return Math.max(0, state.surfaceHeight - 3);
+    }
+    SCPGame.getLegacyUndergroundSectionY = getLegacyUndergroundSectionY;
+    function getSiteSectionSurfaceY(state) {
+        const requested = state.flags["underground-slice-y"];
+        return typeof requested === "number" && Number.isInteger(requested)
+            && requested >= 0 && requested < state.surfaceHeight
+            ? requested : getLegacyUndergroundSectionY(state);
+    }
+    SCPGame.getSiteSectionSurfaceY = getSiteSectionSurfaceY;
+    function undergroundRoomSectionY(state, room) {
+        return room.y ?? getLegacyUndergroundSectionY(state);
+    }
+    SCPGame.undergroundRoomSectionY = undergroundRoomSectionY;
+    function getStaffUndergroundSectionY(state, member) {
+        return member.position.sectionY ?? getLegacyUndergroundSectionY(state);
+    }
+    SCPGame.getStaffUndergroundSectionY = getStaffUndergroundSectionY;
+    function setUndergroundSlice(state, y) {
+        if (!Number.isInteger(y) || y < 0 || y >= state.surfaceHeight)
+            return { ok: false, message: "Coupe hors de l'emprise de surface." };
+        state.flags["underground-slice-y"] = y;
+        if (state.selectedType === "underground-room") {
+            const selected = state.undergroundRooms.find((room) => room.id === state.selectedId);
+            if (selected && undergroundRoomSectionY(state, selected) !== y) {
+                state.selectedId = undefined;
+                state.selectedType = undefined;
+            }
+        }
+        return { ok: true, message: `Coupe ${y + 1}/${state.surfaceHeight} sélectionnée.` };
+    }
+    SCPGame.setUndergroundSlice = setUndergroundSlice;
+    function getUndergroundPlanLevel(state) {
+        const raw = state.flags["underground-plan-level"];
+        if (typeof raw === "number" && Number.isInteger(raw) && raw >= 0 && raw < state.undergroundLevels)
+            return raw;
+        return state.selectedType === "underground-room"
+            ? state.undergroundRooms.find((room) => room.id === state.selectedId)?.level ?? 0 : 0;
+    }
+    SCPGame.getUndergroundPlanLevel = getUndergroundPlanLevel;
+    function setUndergroundPlanLevel(state, level) {
+        if (!Number.isInteger(level) || level < 0 || level >= state.undergroundLevels)
+            return { ok: false, message: "Niveau hors limites." };
+        state.flags["underground-plan-level"] = level;
+        if (state.selectedType === "underground-room") {
+            const chosen = state.undergroundRooms.find((room) => room.id === state.selectedId);
+            if (chosen && chosen.level !== level) {
+                state.selectedId = undefined;
+                state.selectedType = undefined;
+            }
+        }
+        return { ok: true, message: `Vue en plan du niveau -${level + 1}.` };
+    }
+    SCPGame.setUndergroundPlanLevel = setUndergroundPlanLevel;
+    function undergroundXToSurfaceX(state, undergroundX) {
+        return undergroundX + (state.surfaceWidth - state.undergroundWidth) / 2;
+    }
+    SCPGame.undergroundXToSurfaceX = undergroundXToSurfaceX;
+    function surfaceXToUndergroundX(state, surfaceX) {
+        return surfaceX - (state.surfaceWidth - state.undergroundWidth) / 2;
+    }
+    SCPGame.surfaceXToUndergroundX = surfaceXToUndergroundX;
+    function isSurfaceRoomOnUndergroundSection(state, room) {
+        const y = getSiteSectionSurfaceY(state);
+        return room.y <= y && room.y + room.height > y;
+    }
+    SCPGame.isSurfaceRoomOnUndergroundSection = isSurfaceRoomOnUndergroundSection;
+    function getSurfaceRoomAboveUnderground(state, room) {
+        const x = undergroundXToSurfaceX(state, room.x + room.width / 2);
+        const y = undergroundRoomSectionY(state, room);
+        const candidates = state.surfaceRooms.filter((candidate) => SCPGame.pointInRect({ x, y }, candidate.x, candidate.y, candidate.width, candidate.height));
+        return candidates.find((candidate) => candidate.type !== "corridor") ?? candidates[0];
+    }
+    SCPGame.getSurfaceRoomAboveUnderground = getSurfaceRoomAboveUnderground;
+    function getUndergroundRoomBelowSurface(state, room) {
+        if (!isSurfaceRoomOnUndergroundSection(state, room))
+            return undefined;
+        if (room.type === "elevator") {
+            // Selecting an elevator must highlight its ACTUAL shaft, even if the
+            // shaft is on the edge instead of the exact center of its four-cell room.
+            return SCPGame.getUndergroundPortals(state).find(({ elevator }) => elevator.id === room.id)?.shaft;
+        }
+        const left = surfaceXToUndergroundX(state, room.x);
+        const right = surfaceXToUndergroundX(state, room.x + room.width);
+        const section = getSiteSectionSurfaceY(state);
+        return state.undergroundRooms.filter((candidate) => candidate.level === 0
+            && undergroundRoomSectionY(state, candidate) === section)
+            .map((candidate) => ({ room: candidate, overlap: Math.max(0, Math.min(right, candidate.x + candidate.width) - Math.max(left, candidate.x)) }))
+            .filter((candidate) => candidate.overlap > 0)
+            .sort((a, b) => b.overlap - a.overlap)[0]?.room;
+    }
+    SCPGame.getUndergroundRoomBelowSurface = getUndergroundRoomBelowSurface;
+    /** A real shaft must emerge inside a surface elevator, in the cut plane. */
+    function isShaftUnderSurfaceElevator(state, shaft, elevator) {
+        if (shaft.type !== "elevator-shaft" || shaft.level !== 0 || elevator.type !== "elevator")
+            return false;
+        const sectionY = undergroundRoomSectionY(state, shaft);
+        const shaftX = undergroundXToSurfaceX(state, shaft.x + shaft.width / 2);
+        return elevator.enabled && elevator.condition > 15
+            && sectionY >= elevator.y && sectionY < elevator.y + elevator.height
+            && shaftX >= elevator.x && shaftX < elevator.x + elevator.width;
+    }
+    SCPGame.isShaftUnderSurfaceElevator = isShaftUnderSurfaceElevator;
+    function getRegionCampusOverlap(state) {
+        const footprint = getSiteRegionFootprint(state);
+        return state.regionFacilities.filter((item) => item.x < footprint.x + footprint.width && item.x + item.width > footprint.x
+            && item.y < footprint.y + footprint.height && item.y + item.height > footprint.y);
+    }
+    SCPGame.getRegionCampusOverlap = getRegionCampusOverlap;
+    function isRegionFacilityEnterable(facility) {
+        return !["road", "green-zone"].includes(facility.type);
+    }
+    SCPGame.isRegionFacilityEnterable = isRegionFacilityEnterable;
+    function getActiveInteriorFacility(state) {
+        const id = state.activeInteriorFacilityId;
+        if (state.view !== "surface" || !id)
+            return undefined;
+        return state.regionFacilities.find((facility) => facility.id === id && isRegionFacilityEnterable(facility));
+    }
+    SCPGame.getActiveInteriorFacility = getActiveInteriorFacility;
+    // Annex plans are drawn from the real exterior facility (ID, footprint,
+    // condition, function and level). These are inspection-only architectural
+    // interiors, not invented staffed simulation rooms or duplicate buildings.
+    const ANNEX_ZONE_NAMES = {
+        "cover-office": ["Bureaux de couverture", "SCiPnet public", "Archives administratives", "Accueil visiteurs"],
+        "road": ["Chaussée", "Signalisation", "Entretien voirie", "Accès véhicules"],
+        "parking": ["Parc véhicules", "Poste de contrôle", "Maintenance auto", "Accès parking"],
+        "power-plant": ["Salle des turbines", "Régulation électrique", "Atelier technique", "Sas énergie"],
+        "water-treatment": ["Cuves de traitement", "Contrôle qualité", "Stock filtres", "Accès maintenance"],
+        "supply-depot": ["Réception palettes", "Gestion des stocks", "Quai technique", "Contrôle livraison"],
+        "housing": ["Logements du personnel", "Gestion des résidents", "Salle commune", "Hall résidentiel"],
+        "helipad": ["Plateforme hélicoptère", "Contrôle des vols", "Stock aéronautique", "Sas équipage"],
+        "rail-terminal": ["Quais ferroviaires", "Poste d'aiguillage", "Stock logistique", "Contrôle fret"],
+        "public-clinic": ["Consultations civiles", "Accueil médical", "Réserve sanitaire", "Salle d'attente"],
+        "data-center": ["Baies serveurs", "Console réseau", "Groupe secours", "Sas informatique"],
+        "checkpoint": ["Inspection sécurité", "Contrôle d'identités", "Équipement garde", "Portique entrée"],
+        "watchtower": ["Poste d'observation", "Radio surveillance", "Réserve garde", "Accès escalier"],
+        "green-zone": ["Parc paysager", "Gestion des sols", "Entretien vert", "Entrée du parc"]
+    };
+    function getAnnexInteriorPlan(state, facility) {
+        if (!state.regionFacilities.includes(facility) || !isRegionFacilityEnterable(facility))
+            return undefined;
+        // The exterior footprint's aspect ratio controls the size of its plan.
+        // Four distinct zones are projected inside a room-sized canvas, without
+        // introducing any independent, fictitious SurfaceRoom into GameState.
+        const width = Math.min(state.surfaceWidth - 4, Math.max(9, facility.width * 5 + 3));
+        const height = Math.min(state.surfaceHeight - 4, Math.max(7, facility.height * 5 + 3));
+        const x = Math.floor((state.surfaceWidth - width) / 2);
+        const y = Math.floor((state.surfaceHeight - height) / 2);
+        const left = Math.floor(width * 0.56);
+        const top = Math.floor(height * 0.58);
+        const names = ANNEX_ZONE_NAMES[facility.type];
+        return {
+            facilityId: facility.id,
+            buildingName: SCPGame.getRegionDefinition(facility.type).name,
+            footprint: { x, y, width, height },
+            rooms: [
+                { id: `${facility.id}:operations`, name: names[0], function: "Fonction principale", category: "operations", x, y, width: left, height: top },
+                { id: `${facility.id}:control`, name: names[1], function: "Supervision", category: "control", x: x + left, y, width: width - left, height: top },
+                { id: `${facility.id}:support`, name: names[2], function: "Support et stockage", category: "support", x, y: y + top, width: left, height: height - top },
+                { id: `${facility.id}:entry`, name: names[3], function: "Entrée / contrôle", category: "entry", x: x + left, y: y + top, width: width - left, height: height - top }
+            ]
+        };
+    }
+    SCPGame.getAnnexInteriorPlan = getAnnexInteriorPlan;
+})(SCPGame || (SCPGame = {}));
+var SCPGame;
+(function (SCPGame) {
+    /** A door/airlock owns one physical, bidirectional graph edge. */
+    SCPGame.UNDERGROUND_GATE_COSTS = {
+        door: { funds: 650, parts: 2 },
+        airlock: { funds: 2600, parts: 7 }
+    };
+    function getUndergroundGateBetween(state, left, right) {
+        return (state.undergroundGates ?? []).find((gate) => gate.roomAId === left.id && gate.roomBId === right.id
+            || gate.roomAId === right.id && gate.roomBId === left.id);
+    }
+    SCPGame.getUndergroundGateBetween = getUndergroundGateBetween;
+    function getUndergroundGateStatus(state, gate) {
+        if (!gate.enabled)
+            return 'Verrouillé';
+        if (gate.kind === 'airlock' && (!gate.powered || state.resources.power <= 5 || Boolean(state.flags['surface-blackout'])))
+            return 'Panne électrique — vantaux fermés';
+        if (gate.kind === 'airlock' && !gate.airSupply)
+            return 'Air indisponible — sas arrêté';
+        if (gate.kind === 'airlock') {
+            const a = state.undergroundRooms.find((room) => room.id === gate.roomAId);
+            const b = state.undergroundRooms.find((room) => room.id === gate.roomBId);
+            if (!a || !b)
+                return 'Sas sans liaison technique valide';
+            const statusA = SCPGame.getUndergroundUtilityStatus(state, a);
+            const statusB = SCPGame.getUndergroundUtilityStatus(state, b);
+            if (!statusA.power || !statusB.power)
+                return 'Sas hors circuit électrique';
+            if (!statusA.air || !statusB.air)
+                return 'Sas sans ventilation raccordée';
+        }
+        if (gate.cycle?.phase === 'equalizing')
+            return `Égalisation — ${gate.cycle.remaining} min`;
+        if (gate.cycle?.phase === 'crossing')
+            return 'Transit en cours — accès occupé';
+        if (gate.cycle?.phase === 'retreating')
+            return 'Retour sécurisé vers le côté d’origine';
+        if (gate.queue.length)
+            return `File FIFO — ${gate.queue.length}/${gate.queueCapacity}`;
+        return gate.kind === 'airlock' ? 'Sas disponible — deux portes fermées' : 'Porte disponible';
+    }
+    SCPGame.getUndergroundGateStatus = getUndergroundGateStatus;
+    /** No implicit wall bypass for explicit doors; missing gates preserve legacy open corridors. */
+    function canTraverseUndergroundGate(state, from, to, member) {
+        if (!SCPGame.undergroundRoomsTouch(state, from, to)
+            || !SCPGame.canStaffEnterUndergroundRoom(from, member) || !SCPGame.canStaffEnterUndergroundRoom(to, member))
+            return false;
+        const gate = getUndergroundGateBetween(state, from, to);
+        if (!gate)
+            return true;
+        if (!gate.enabled || (member && member.clearance < gate.minClearance))
+            return false;
+        if (gate.direction !== 'both') {
+            const permitted = gate.direction === 'a-to-b' ? gate.roomAId === from.id : gate.roomBId === from.id;
+            if (!permitted)
+                return false;
+        }
+        if (gate.kind === 'airlock' && (!gate.powered || !gate.airSupply || state.resources.power <= 5
+            || Boolean(state.flags['surface-blackout'])
+            || !SCPGame.getUndergroundUtilityStatus(state, from).power
+            || !SCPGame.getUndergroundUtilityStatus(state, to).power
+            || !SCPGame.getUndergroundUtilityStatus(state, from).air
+            || !SCPGame.getUndergroundUtilityStatus(state, to).air))
+            return false;
+        return true;
+    }
+    SCPGame.canTraverseUndergroundGate = canTraverseUndergroundGate;
+    function installUndergroundGate(state, fromId, toId, kind) {
+        const from = state.undergroundRooms.find((room) => room.id === fromId);
+        const to = state.undergroundRooms.find((room) => room.id === toId);
+        if (!from || !to || from.id === to.id || !SCPGame.undergroundRoomsTouch(state, from, to)
+            || from.level !== to.level)
+            return { ok: false, message: 'Porte impossible : deux modules doivent partager une vraie cloison X/Y du même niveau.' };
+        if (getUndergroundGateBetween(state, from, to))
+            return { ok: false, message: 'Une porte ou un sas contrôle déjà cette liaison.' };
+        if (kind !== 'door' && kind !== 'airlock')
+            return { ok: false, message: 'Type d’accès souterrain inconnu.' };
+        const cost = SCPGame.UNDERGROUND_GATE_COSTS[kind];
+        if (!SCPGame.payCost(state.resources, cost))
+            return { ok: false, message: 'Crédits ou pièces insuffisants pour cet accès.' };
+        const gate = {
+            id: SCPGame.uid('underground-gate'), roomAId: from.id, roomBId: to.id, kind,
+            enabled: true, minClearance: Math.max(SCPGame.getUndergroundClearanceRequirement(from), SCPGame.getUndergroundClearanceRequirement(to)),
+            direction: 'both', powered: true, airSupply: true, queueCapacity: 4,
+            queue: [], passedCount: 0, paidFunds: cost.funds, paidParts: cost.parts
+        };
+        (state.undergroundGates ?? (state.undergroundGates = [])).push(gate);
+        SCPGame.logHistory(state, `${kind === 'airlock' ? 'Sas' : 'Porte'} installé sur la liaison ${SCPGame.getUndergroundDefinition(from.type).name} / ${SCPGame.getUndergroundDefinition(to.type).name}.`);
+        return { ok: true, message: kind === 'airlock' ? 'Sas souterrain installé et interverrouillé.' : 'Porte souterraine installée.' };
+    }
+    SCPGame.installUndergroundGate = installUndergroundGate;
+    function configureUndergroundGate(state, gateId, updates) {
+        const gate = (state.undergroundGates ?? []).find((entry) => entry.id === gateId);
+        if (!gate)
+            return { ok: false, message: 'Accès souterrain introuvable.' };
+        if (updates.minClearance !== undefined && (!Number.isInteger(updates.minClearance)
+            || updates.minClearance < 0 || updates.minClearance > 5))
+            return { ok: false, message: 'Habilitation invalide.' };
+        if (updates.direction !== undefined && !['both', 'a-to-b', 'b-to-a'].includes(updates.direction))
+            return { ok: false, message: 'Sens de passage invalide.' };
+        for (const [key, value] of Object.entries(updates)) {
+            if (!['enabled', 'powered', 'airSupply', 'minClearance', 'direction'].includes(key))
+                return { ok: false, message: 'Réglage de sas inconnu.' };
+            if (['enabled', 'powered', 'airSupply'].includes(key) && typeof value !== 'boolean')
+                return { ok: false, message: 'Réglage de sas invalide.' };
+        }
+        Object.assign(gate, updates);
+        return { ok: true, message: `Accès configuré : ${getUndergroundGateStatus(state, gate)}.` };
+    }
+    SCPGame.configureUndergroundGate = configureUndergroundGate;
+    function removeUndergroundGate(state, gateId) {
+        const gates = state.undergroundGates ?? [];
+        const index = gates.findIndex((gate) => gate.id === gateId);
+        if (index < 0)
+            return { ok: false, message: 'Accès souterrain introuvable.' };
+        const gate = gates[index];
+        if (gate.cycle)
+            return { ok: false, message: 'Évacuez le sas avant démontage.' };
+        gates.splice(index, 1);
+        SCPGame.addResource(state.resources, 'funds', gate.paidFunds * 0.4);
+        SCPGame.addResource(state.resources, 'parts', gate.paidParts * 0.4);
+        return { ok: true, message: 'Accès démonté, ressources partiellement récupérées.' };
+    }
+    SCPGame.removeUndergroundGate = removeUndergroundGate;
+    // Gate queues are FIFO. A single occupant can equalize or cross at a time.
+    function requestUndergroundGate(state, gate, member, from, to) {
+        if (!canTraverseUndergroundGate(state, from, to, member))
+            return;
+        const current = gate.cycle;
+        if (current?.staffId === member.id)
+            return;
+        if (!gate.queue.includes(member.id) && gate.queue.length < gate.queueCapacity)
+            gate.queue.push(member.id);
+        if (!gate.cycle && gate.queue[0] === member.id) {
+            gate.queue.shift();
+            gate.cycle = { staffId: member.id, fromId: from.id, toId: to.id, phase: 'equalizing', remaining: 4 };
+        }
+        member.status = 'queued';
+        member.routeBlockedReason = getUndergroundGateStatus(state, gate);
+    }
+    SCPGame.requestUndergroundGate = requestUndergroundGate;
+    function moveToGateDestination(state, member, from, to) {
+        const targetY = SCPGame.undergroundRoomSectionY(state, to);
+        const sectionY = member.position.sectionY ?? SCPGame.getLegacyUndergroundSectionY(state);
+        const nextX = from.level === to.level && targetY !== SCPGame.undergroundRoomSectionY(state, from)
+            ? (Math.max(from.x, to.x) + Math.min(from.x + from.width, to.x + to.width)) / 2
+            : SCPGame.undergroundRoomCenter(to).x;
+        // Progress is always on one axis per tick, including return after a lock.
+        const dx = nextX - member.position.x;
+        if (Math.abs(dx) > 0.00001) {
+            member.position.x += Math.sign(dx) * Math.min(Math.abs(dx), 0.55);
+            return false;
+        }
+        if (Math.abs(sectionY - targetY) > 0.00001) {
+            const delta = targetY - sectionY;
+            member.position.sectionY = sectionY + Math.sign(delta) * Math.min(Math.abs(delta), 0.55);
+            return false;
+        }
+        const finalX = SCPGame.undergroundRoomCenter(to).x;
+        const last = finalX - member.position.x;
+        if (Math.abs(last) > 0.00001) {
+            member.position.x += Math.sign(last) * Math.min(Math.abs(last), 0.55);
+            return false;
+        }
+        member.position.x = finalX;
+        member.position.sectionY = targetY;
+        member.position.y = to.level;
+        member.position.level = to.level;
+        return true;
+    }
+    /** Returns true if an airlock owns this agent's movement during this minute. */
+    function processUndergroundGateCycle(state, member) {
+        const gate = (state.undergroundGates ?? []).find((entry) => entry.cycle?.staffId === member.id);
+        if (!gate || !gate.cycle || member.position.layer !== 'underground')
+            return false;
+        const cycle = gate.cycle;
+        const from = state.undergroundRooms.find((room) => room.id === cycle.fromId);
+        const to = state.undergroundRooms.find((room) => room.id === cycle.toId);
+        if (!from || !to)
+            return true; // Keep the cycle contained until a validated intervention.
+        const permitted = canTraverseUndergroundGate(state, from, to, member);
+        if (cycle.phase === 'equalizing') {
+            if (!permitted) {
+                member.status = 'queued';
+                member.routeBlockedReason = getUndergroundGateStatus(state, gate);
+                return true;
+            }
+            cycle.remaining = Math.max(0, cycle.remaining - 1);
+            member.status = 'queued';
+            member.routeBlockedReason = getUndergroundGateStatus(state, gate);
+            if (cycle.remaining === 0)
+                cycle.phase = 'crossing';
+            return true;
+        }
+        // An electrical/air outage suspends a powered cycle in place. A manual
+        // lockdown or revoked authorization, by contrast, triggers a slow retreat.
+        if (cycle.phase === 'crossing' && !permitted) {
+            const utilityFailure = gate.enabled && gate.kind === 'airlock' &&
+                (!gate.powered || !gate.airSupply || state.resources.power <= 5 || Boolean(state.flags['surface-blackout'])
+                    || !SCPGame.getUndergroundUtilityStatus(state, from).power
+                    || !SCPGame.getUndergroundUtilityStatus(state, to).power
+                    || !SCPGame.getUndergroundUtilityStatus(state, from).air
+                    || !SCPGame.getUndergroundUtilityStatus(state, to).air);
+            if (utilityFailure) {
+                member.status = 'queued';
+                member.routeBlockedReason = getUndergroundGateStatus(state, gate);
+                return true;
+            }
+            cycle.phase = 'retreating';
+        }
+        const destination = cycle.phase === 'retreating' ? from : to;
+        // A locked gate cannot teleport a person caught halfway through it.
+        const arrived = moveToGateDestination(state, member, from, destination);
+        if (!['dead', 'injured', 'quarantined'].includes(member.status))
+            member.status = 'moving';
+        member.routeBlockedReason = cycle.phase === 'retreating'
+            ? 'Accès fermé : retour physique côté d’origine' : undefined;
+        if (arrived) {
+            if (cycle.phase === 'crossing')
+                gate.passedCount++;
+            gate.cycle = undefined;
+            member.path = [];
+            member.pathIndex = 0;
+            member.target = undefined;
+            member.targetRoomId = undefined;
+            if (cycle.phase === 'retreating')
+                member.status = 'queued';
+        }
+        return true;
+    }
+    SCPGame.processUndergroundGateCycle = processUndergroundGateCycle;
+    function evacuateUndergroundGate(state, gateId) {
+        const gate = (state.undergroundGates ?? []).find((entry) => entry.id === gateId);
+        if (!gate)
+            return { ok: false, message: 'Sas introuvable.' };
+        if (gate.cycle) {
+            const cycle = gate.cycle;
+            if (cycle.phase === 'equalizing') {
+                // The occupant has never left the source room during equalization.
+                const member = state.staff.find((entry) => entry.id === cycle.staffId);
+                if (member) {
+                    member.routeBlockedReason = 'Évacuation vers le côté d’origine sans traversée.';
+                    member.status = 'queued';
+                }
+                gate.cycle = undefined;
+            }
+            else
+                cycle.phase = 'retreating';
+        }
+        gate.queue = [];
+        gate.enabled = false;
+        return { ok: true, message: 'Sas verrouillé : évacuation sans franchissement comptabilisé.' };
+    }
+    SCPGame.evacuateUndergroundGate = evacuateUndergroundGate;
+    function maintainUndergroundGates(state) {
+        const valid = new Set(state.staff.filter((member) => member.status !== 'dead' && member.position.layer === 'underground').map((member) => member.id));
+        for (const gate of state.undergroundGates ?? []) {
+            gate.queue = gate.queue.filter((id, index) => valid.has(id) && gate.queue.indexOf(id) === index && gate.cycle?.staffId !== id);
+            // A dead worker cannot occupy an airlock forever.
+            if (gate.cycle && !valid.has(gate.cycle.staffId))
+                gate.cycle = undefined;
+        }
+    }
+    SCPGame.maintainUndergroundGates = maintainUndergroundGates;
+})(SCPGame || (SCPGame = {}));
+var SCPGame;
+(function (SCPGame) {
+    SCPGame.UNDERGROUND_CONDUIT_COST = { funds: 850, parts: 4 };
+    function getUndergroundConduitBetween(state, first, second) {
+        return (state.undergroundConduits ?? []).find((line) => line.roomAId === first.id && line.roomBId === second.id
+            || line.roomBId === first.id && line.roomAId === second.id);
+    }
+    SCPGame.getUndergroundConduitBetween = getUndergroundConduitBetween;
+    function isServiceRoomUsable(room) {
+        // Sealed cells retain utility shafts: closing a personnel door is not
+        // equivalent to cutting embedded cables, pipes, or ventilation ducts.
+        return room.enabled && room.condition > 15;
+    }
+    function createLegacyUndergroundConduits(state) {
+        const result = [];
+        for (let i = 0; i < state.undergroundRooms.length; i++) {
+            for (let j = i + 1; j < state.undergroundRooms.length; j++) {
+                const first = state.undergroundRooms[i], second = state.undergroundRooms[j];
+                if (!SCPGame.undergroundRoomsTouch(state, first, second))
+                    continue;
+                result.push({ roomAId: first.id, roomBId: second.id, power: true, water: true, air: true,
+                    paidFunds: 0, paidParts: 0 });
+            }
+        }
+        return result;
+    }
+    SCPGame.createLegacyUndergroundConduits = createLegacyUndergroundConduits;
+    function installUndergroundConduit(state, roomAId, roomBId) {
+        const first = state.undergroundRooms.find((room) => room.id === roomAId);
+        const second = state.undergroundRooms.find((room) => room.id === roomBId);
+        if (!first || !second || !SCPGame.undergroundRoomsTouch(state, first, second))
+            return { ok: false, message: "Une gaine technique exige deux modules réellement contigus." };
+        if (getUndergroundConduitBetween(state, first, second))
+            return { ok: false, message: "Cette liaison technique existe déjà." };
+        if (!SCPGame.payCost(state.resources, SCPGame.UNDERGROUND_CONDUIT_COST))
+            return { ok: false, message: "Crédits ou pièces insuffisants pour poser la gaine." };
+        (state.undergroundConduits ?? (state.undergroundConduits = [])).push({ roomAId, roomBId, power: true, water: true, air: true,
+            paidFunds: SCPGame.UNDERGROUND_CONDUIT_COST.funds, paidParts: SCPGame.UNDERGROUND_CONDUIT_COST.parts });
+        SCPGame.logHistory(state, "Gaine technique raccordée : courant, eau et ventilation.");
+        return { ok: true, message: "Gaine technique installée : électricité, eau et air raccordés." };
+    }
+    SCPGame.installUndergroundConduit = installUndergroundConduit;
+    function toggleUndergroundConduit(state, roomAId, roomBId, kind) {
+        if (!["power", "water", "air"].includes(kind))
+            return { ok: false, message: "Réseau inconnu." };
+        const first = state.undergroundRooms.find((room) => room.id === roomAId);
+        const second = state.undergroundRooms.find((room) => room.id === roomBId);
+        if (!first || !second || !SCPGame.undergroundRoomsTouch(state, first, second))
+            return { ok: false, message: "Cette liaison physique n'existe plus." };
+        const conduit = getUndergroundConduitBetween(state, first, second);
+        if (!conduit)
+            return { ok: false, message: "Installez d'abord une gaine technique." };
+        conduit[kind] = !conduit[kind];
+        return { ok: true, message: `${kind === "power" ? "Électricité" : kind === "water" ? "Eau" : "Air"} : ${conduit[kind] ? "raccordé" : "isolé"}.` };
+    }
+    SCPGame.toggleUndergroundConduit = toggleUndergroundConduit;
+    function removeUndergroundConduit(state, roomAId, roomBId) {
+        const lines = state.undergroundConduits ?? [];
+        const index = lines.findIndex((line) => line.roomAId === roomAId && line.roomBId === roomBId
+            || line.roomBId === roomAId && line.roomAId === roomBId);
+        if (index < 0)
+            return { ok: false, message: "Gaine introuvable." };
+        const [line] = lines.splice(index, 1);
+        SCPGame.addResource(state.resources, "funds", line.paidFunds * 0.4);
+        SCPGame.addResource(state.resources, "parts", line.paidParts * 0.4);
+        return { ok: true, message: "Gaine démontée : remboursement partiel des frais réellement payés." };
+    }
+    SCPGame.removeUndergroundConduit = removeUndergroundConduit;
+    function getUndergroundUtilityMap(state) {
+        const result = new Map();
+        const rooms = state.undergroundRooms.filter(isServiceRoomUsable);
+        for (const room of state.undergroundRooms) {
+            result.set(room.id, { power: false, water: false, air: false });
+        }
+        const byId = new Map(rooms.map((room) => [room.id, room]));
+        const links = (state.undergroundConduits ?? []).filter((line) => {
+            const a = byId.get(line.roomAId), b = byId.get(line.roomBId);
+            return Boolean(a && b && SCPGame.undergroundRoomsTouch(state, a, b));
+        });
+        // Pipes and cables can remain live inside a closed security sector.
+        // Source detection checks actual elevator-to-shaft geometry, not whether
+        // personnel are currently permitted to enter that shaft.
+        const portals = rooms.filter((room) => room.type === "elevator-shaft" && room.level === 0
+            && state.surfaceRooms.some((surface) => surface.type === "elevator" && surface.enabled
+                && surface.condition > 15 && SCPGame.isShaftUnderSurfaceElevator(state, room, surface)))
+            .map((room) => room.id);
+        const globalPower = state.resources.power > 5 && !Boolean(state.flags["surface-blackout"]);
+        const globalWater = state.resources.water > 3;
+        const propagate = (kind, seeds) => {
+            const reachable = new Set(seeds.filter((id) => byId.has(id)));
+            const queue = [...reachable];
+            for (let i = 0; i < queue.length; i++) {
+                const current = queue[i];
+                for (const line of links) {
+                    if (!line[kind])
+                        continue;
+                    const neighbour = line.roomAId === current ? line.roomBId
+                        : line.roomBId === current ? line.roomAId : undefined;
+                    if (neighbour && !reachable.has(neighbour)) {
+                        reachable.add(neighbour);
+                        queue.push(neighbour);
+                    }
+                }
+            }
+            for (const id of reachable)
+                result.get(id)[kind] = true;
+        };
+        // Underground battery nodes are local emergency sources. They do not create
+        // energy from nothing: the Site must still have some reserve in storage.
+        const batteryNodes = state.resources.power > 1
+            ? rooms.filter((room) => room.type === "power-node").map((room) => room.id) : [];
+        propagate("power", [...(globalPower ? portals : []), ...batteryNodes]);
+        propagate("water", globalWater ? portals : []);
+        const poweredFilters = rooms.filter((room) => room.type === "air-filtration"
+            && result.get(room.id)?.power).map((room) => room.id);
+        propagate("air", [...(globalPower ? portals : []), ...poweredFilters]);
+        return result;
+    }
+    SCPGame.getUndergroundUtilityMap = getUndergroundUtilityMap;
+    function getUndergroundUtilityStatus(state, room) {
+        return getUndergroundUtilityMap(state).get(room.id) ?? { power: false, water: false, air: false };
+    }
+    SCPGame.getUndergroundUtilityStatus = getUndergroundUtilityStatus;
+})(SCPGame || (SCPGame = {}));
+var SCPGame;
+(function (SCPGame) {
+    function getUndergroundClearanceRequirement(room) {
+        switch (room.type) {
+            case "keter-containment":
+            case "heavy-containment":
+            case "acid-system":
+            case "temporal-lock": return 4;
+            case "euclid-containment":
+            case "bio-containment":
+            case "infohazard-vault": return 3;
+            case "research-lab":
+            case "security-post": return 2;
+            case "safe-containment":
+            case "humanoid-cell":
+            case "medical-bay": return 1;
+            default: return 0;
+        }
+    }
+    SCPGame.getUndergroundClearanceRequirement = getUndergroundClearanceRequirement;
+    function canStaffEnterUndergroundRoom(room, member) {
+        return room.enabled && !room.sealed && room.condition > 15
+            && (!member || member.clearance >= getUndergroundClearanceRequirement(room));
+    }
+    SCPGame.canStaffEnterUndergroundRoom = canStaffEnterUndergroundRoom;
+    // For historical compatibility the Point.y field still denotes LEVEL in
+    // underground simulation. The transverse coordinate is room.y / point.sectionY.
+    function undergroundRoomCenter(room) {
+        return { x: room.x + room.width / 2, y: room.level };
+    }
+    SCPGame.undergroundRoomCenter = undergroundRoomCenter;
+    function undergroundRoomPosition(state, room) {
+        return { layer: "underground", x: room.x + room.width / 2,
+            y: room.level, level: room.level, sectionY: SCPGame.undergroundRoomSectionY(state, room) };
+    }
+    SCPGame.undergroundRoomPosition = undergroundRoomPosition;
+    function undergroundRoomsTouch(state, left, right) {
+        if (left.id === right.id)
+            return false;
+        const ly = SCPGame.undergroundRoomSectionY(state, left);
+        const ry = SCPGame.undergroundRoomSectionY(state, right);
+        if (left.level === right.level) {
+            // Same longitudinal row: cells must share a wall, not a proximity gap.
+            if (ly === ry)
+                return left.x + left.width === right.x || right.x + right.width === left.x;
+            // Adjacent transverse rows connect only across an overlapping x interval.
+            return Math.abs(ly - ry) === 1
+                && Math.min(left.x + left.width, right.x + right.width) > Math.max(left.x, right.x);
+        }
+        return left.type === "elevator-shaft" && right.type === "elevator-shaft"
+            && Math.abs(left.level - right.level) === 1 && ly === ry
+            && left.x === right.x && left.width === right.width;
+    }
+    SCPGame.undergroundRoomsTouch = undergroundRoomsTouch;
+    function areUndergroundRoomsConnected(left, right, state) {
+        if (!canStaffEnterUndergroundRoom(left) || !canStaffEnterUndergroundRoom(right))
+            return false;
+        if (!state) {
+            const legacy = { surfaceHeight: 17 };
+            return undergroundRoomsTouch(legacy, left, right);
+        }
+        return SCPGame.canTraverseUndergroundGate(state, left, right);
+    }
+    SCPGame.areUndergroundRoomsConnected = areUndergroundRoomsConnected;
+    function routeTravelCost(state, left, right) {
+        if (left.level !== right.level)
+            return 6;
+        return Math.abs(undergroundRoomCenter(right).x - undergroundRoomCenter(left).x)
+            + 3 * Math.abs(SCPGame.undergroundRoomSectionY(state, right) - SCPGame.undergroundRoomSectionY(state, left)) + 0.5;
+    }
+    /**
+     * Dijkstra through physical (x, sectionY, depth) volumes, including
+     * horizontal longitudinal links, adjacent-row junctions and aligned shafts.
+     * Locked/disabled modules and intermediate clearance are hard constraints.
+     */
+    function planUndergroundRoute(state, from, destination, member) {
+        const level = from.level ?? from.y;
+        const sectionY = from.sectionY ?? SCPGame.getLegacyUndergroundSectionY(state);
+        if (from.layer !== "underground" || !Number.isFinite(from.x)
+            || !Number.isInteger(level) || level < 0 || level >= state.undergroundLevels
+            || !Number.isFinite(sectionY) || sectionY < 0 || sectionY >= state.surfaceHeight
+            || from.x < 0 || from.x > state.undergroundWidth
+            || !state.undergroundRooms.includes(destination) || !canStaffEnterUndergroundRoom(destination, member))
+            return undefined;
+        const rooms = state.undergroundRooms.filter((room) => canStaffEnterUndergroundRoom(room, member));
+        const origins = rooms.filter((room) => room.level === level
+            && Math.abs(sectionY - SCPGame.undergroundRoomSectionY(state, room)) < 0.00001
+            && from.x >= room.x && from.x <= room.x + room.width);
+        if (!origins.length)
+            return undefined;
+        const distance = new Map();
+        const previous = new Map();
+        const visited = new Set();
+        origins.forEach((room) => distance.set(room.id, Math.abs(undergroundRoomCenter(room).x - from.x)));
+        while (visited.size < rooms.length) {
+            let current;
+            let best = Infinity;
+            for (const room of rooms) {
+                const score = distance.get(room.id) ?? Infinity;
+                if (!visited.has(room.id) && score < best) {
+                    current = room;
+                    best = score;
+                }
+            }
+            if (!current)
+                break;
+            if (current.id === destination.id) {
+                const route = [current];
+                while (previous.has(route[0].id))
+                    route.unshift(previous.get(route[0].id));
+                return route;
+            }
+            visited.add(current.id);
+            for (const neighbour of rooms) {
+                if (visited.has(neighbour.id) || !SCPGame.canTraverseUndergroundGate(state, current, neighbour, member))
+                    continue;
+                const candidate = best + routeTravelCost(state, current, neighbour);
+                if (candidate < (distance.get(neighbour.id) ?? Infinity)) {
+                    distance.set(neighbour.id, candidate);
+                    previous.set(neighbour.id, current);
+                }
+            }
+        }
+        return undefined;
+    }
+    SCPGame.planUndergroundRoute = planUndergroundRoute;
+    /** The shaft's x/y footprint must emerge INSIDE the actual surface lift. */
+    function getUndergroundPortals(state) {
+        const elevators = state.surfaceRooms.filter((room) => room.type === "elevator" && room.enabled && room.condition > 15);
+        const shafts = state.undergroundRooms.filter((room) => room.type === "elevator-shaft" && room.level === 0 && canStaffEnterUndergroundRoom(room));
+        const portals = [];
+        for (const elevator of elevators) {
+            for (const shaft of shafts) {
+                if (SCPGame.isShaftUnderSurfaceElevator(state, shaft, elevator))
+                    portals.push({ elevator, shaft });
+            }
+        }
+        return portals;
+    }
+    SCPGame.getUndergroundPortals = getUndergroundPortals;
+    function hasUndergroundElevatorConnection(state, destination, member) {
+        return getUndergroundPortals(state).some(({ shaft }) => planUndergroundRoute(state, undergroundRoomPosition(state, shaft), destination, member) !== undefined);
+    }
+    SCPGame.hasUndergroundElevatorConnection = hasUndergroundElevatorConnection;
+})(SCPGame || (SCPGame = {}));
+var SCPGame;
+(function (SCPGame) {
     const CONTAINMENT_ROOM_TAGS = ["safe", "euclid", "keter", "humanoid", "bio", "infohazard", "heavy", "temporal"];
-    const LOAD_SCHEMA_VERSION = 3;
+    const LOAD_SCHEMA_VERSION = 6;
     const SURFACE_ACCESS_SIDES = ["north", "east", "south", "west"];
     const SURFACE_ACCESS_TRAFFIC = ["public", "staff", "security", "medical", "contaminated", "freight", "anomaly"];
     const SURFACE_ACCESS_COSTS = {
@@ -2625,6 +3374,7 @@ var SCPGame;
             x,
             level,
             width: width ?? definition.width,
+            y: 14,
             condition: 100,
             staffAssigned: [],
             upgrades: [],
@@ -2672,6 +3422,14 @@ var SCPGame;
             createUndergroundRoom("elevator-shaft", 18, 0, 1),
             createUndergroundRoom("elevator-shaft", 18, 1, 1),
             createUndergroundRoom("elevator-shaft", 18, 2, 1),
+            // Visible galleries fill the genuine gaps in the starting installation.
+            createUndergroundRoom("service-tunnel", 5, 0, 3),
+            createUndergroundRoom("service-tunnel", 13, 0, 1),
+            createUndergroundRoom("service-tunnel", 16, 0, 2),
+            createUndergroundRoom("service-tunnel", 7, 1, 3),
+            createUndergroundRoom("service-tunnel", 13, 1, 1),
+            createUndergroundRoom("service-tunnel", 16, 1, 2),
+            createUndergroundRoom("service-tunnel", 16, 2, 2),
             createUndergroundRoom("service-tunnel", 8, 0, 5),
             createUndergroundRoom("security-post", 14, 0, 2),
             createUndergroundRoom("safe-containment", 2, 0, 3),
@@ -2768,6 +3526,8 @@ var SCPGame;
             regionFacilities: createInitialFacilities(),
             surfaceRooms: createInitialSurfaceRooms(),
             undergroundRooms: createInitialUndergroundRooms(),
+            undergroundGates: [],
+            undergroundConduits: [],
             staff: createInitialStaff(seed),
             workItems: [],
             scps,
@@ -2801,6 +3561,7 @@ var SCPGame;
             gameOver: false,
             victory: false
         };
+        state.undergroundConduits = SCPGame.createLegacyUndergroundConduits(state);
         state.surfaceRooms.forEach((room) => room.accessPoints = SCPGame.createDefaultSurfaceAccesses(state, room));
         autoAssignStaff(state);
         logHistory(state, "Prise de commandement du Site Deep Protocol.");
@@ -2879,12 +3640,66 @@ var SCPGame;
     }
     SCPGame.addNotification = addNotification;
     function setView(state, view) {
+        const previousView = state.view;
+        const selectedSurface = state.selectedType === "surface-room"
+            ? state.surfaceRooms.find((room) => room.id === state.selectedId) : undefined;
+        const selectedUnderground = state.selectedType === "underground-room"
+            ? state.undergroundRooms.find((room) => room.id === state.selectedId) : undefined;
+        const selectedFacility = state.selectedType === "facility"
+            ? state.regionFacilities.find((facility) => facility.id === state.selectedId) : undefined;
+        const existingAnnex = previousView === "surface" && state.activeInteriorFacilityId
+            ? state.regionFacilities.find((facility) => facility.id === state.activeInteriorFacilityId) : undefined;
         state.view = view;
         state.buildSelection = undefined;
-        state.selectedId = undefined;
-        state.selectedType = undefined;
+        // The global Surface tab always opens the primary Site interior. Viewing
+        // a regional building's annex requires the explicit Explore action below.
+        state.activeInteriorFacilityId = undefined;
+        if (view === "region" && (selectedFacility || existingAnnex)) {
+            const facility = selectedFacility ?? existingAnnex;
+            state.selectedId = facility.id;
+            state.selectedType = "facility";
+            return;
+        }
+        if (view === "region" || view === "surface") {
+            const linked = selectedSurface || (selectedUnderground && SCPGame.getSurfaceRoomAboveUnderground(state, selectedUnderground));
+            state.selectedId = linked?.id;
+            state.selectedType = linked ? "surface-room" : undefined;
+        }
+        else if (view === "underground") {
+            if (selectedUnderground)
+                SCPGame.setUndergroundSlice(state, SCPGame.undergroundRoomSectionY(state, selectedUnderground));
+            else if (selectedSurface) {
+                const portals = selectedSurface.type === "elevator"
+                    ? SCPGame.getUndergroundPortals(state).filter((portal) => portal.elevator.id === selectedSurface.id) : [];
+                const section = portals[0] ? SCPGame.undergroundRoomSectionY(state, portals[0].shaft)
+                    : SCPGame.isSurfaceRoomOnUndergroundSection(state, selectedSurface)
+                        ? SCPGame.getSiteSectionSurfaceY(state)
+                        : Math.min(state.surfaceHeight - 1, selectedSurface.y + Math.floor(selectedSurface.height / 2));
+                SCPGame.setUndergroundSlice(state, section);
+            }
+            const linked = selectedUnderground || (selectedSurface && SCPGame.getUndergroundRoomBelowSurface(state, selectedSurface));
+            state.selectedId = linked?.id;
+            state.selectedType = linked ? "underground-room" : undefined;
+        }
+        else if (view !== previousView) {
+            state.selectedId = undefined;
+            state.selectedType = undefined;
+        }
     }
     SCPGame.setView = setView;
+    function openAnnexInterior(state, facilityId) {
+        const facility = state.regionFacilities.find((entry) => entry.id === facilityId);
+        if (!facility || !SCPGame.isRegionFacilityEnterable(facility))
+            return { ok: false, message: "Cette installation ne possède pas de plan intérieur." };
+        state.view = "surface";
+        state.activeInteriorFacilityId = facility.id;
+        state.selectedId = facility.id;
+        state.selectedType = "facility";
+        state.buildSelection = undefined;
+        state.flags["annex-room-selected"] = "";
+        return { ok: true, message: `${SCPGame.getRegionDefinition(facility.type).name} : plan intérieur ouvert.` };
+    }
+    SCPGame.openAnnexInterior = openAnnexInterior;
     function setSpeed(state, speed) {
         if (state.crisis.active && speed === 4)
             speed = 2;
@@ -2914,6 +3729,9 @@ var SCPGame;
         if (x < 0 || y < 0 || x + definition.size.x > state.regionWidth || y + definition.size.y > state.regionHeight)
             return { ok: false, message: "Construction hors de la carte." };
         const candidate = { x, y, width: definition.size.x, height: definition.size.y };
+        if (SCPGame.rectanglesOverlap(candidate, SCPGame.getSiteRegionFootprint(state))) {
+            return { ok: false, message: "Terrain du bâtiment principal : aménagez-le depuis la vue Surface." };
+        }
         if (state.regionFacilities.some((facility) => SCPGame.rectanglesOverlap(candidate, facility)))
             return { ok: false, message: "La zone est déjà occupée." };
         if (!SCPGame.payCost(state.resources, definition.cost))
@@ -3088,17 +3906,19 @@ var SCPGame;
         return { ok: true, message: "Sas évacué du côté d'origine et verrouillé. Aucun passage n'a été compté." };
     }
     SCPGame.evacuateSurfaceAccessAction = evacuateSurfaceAccessAction;
-    function buildUndergroundRoom(state, type, x, level) {
+    function buildUndergroundRoom(state, type, x, level, sectionY = SCPGame.getSiteSectionSurfaceY(state)) {
         const definition = SCPGame.getUndergroundDefinition(type);
+        if (!Number.isInteger(sectionY) || sectionY < 0 || sectionY >= state.surfaceHeight)
+            return { ok: false, message: "Coupe souterraine hors limites." };
         if (!isUndergroundDefinitionUnlocked(state, definition))
             return { ok: false, message: "Module non autorisé ou recherche manquante." };
         if (level < 0 || level >= state.undergroundLevels || x < 0 || x + definition.width > state.undergroundWidth)
             return { ok: false, message: "Construction hors des limites géologiques." };
         if (level >= 5 && !isResearchUnlockActive(state, "level-5-plus") && state.mode !== "sandbox")
             return { ok: false, message: "L'excavation profonde n'est pas encore maîtrisée." };
-        const candidate = { x, level, width: definition.width };
-        if (state.undergroundRooms.some((room) => SCPGame.undergroundOverlap(candidate, room)))
-            return { ok: false, message: "Ce volume est déjà occupé." };
+        const candidate = { x, y: sectionY, level, width: definition.width };
+        if (state.undergroundRooms.some((room) => SCPGame.undergroundOverlap(candidate, { ...room, y: SCPGame.undergroundRoomSectionY(state, room) })))
+            return { ok: false, message: "Ce volume est déjà occupé sur cette coupe." };
         const depthCostMultiplier = 1 + level * 0.12;
         const scaledCost = {};
         Object.entries(definition.cost).forEach(([key, amount]) => {
@@ -3107,14 +3927,26 @@ var SCPGame;
         if (!SCPGame.payCost(state.resources, scaledCost))
             return { ok: false, message: "Ressources insuffisantes pour cette profondeur." };
         const room = createUndergroundRoom(type, x, level);
+        room.y = sectionY;
         state.undergroundRooms.push(room);
         state.selectedId = room.id;
         state.selectedType = "underground-room";
         autoAssignStaff(state);
-        logHistory(state, `${definition.name} construit au niveau -${level + 1}.`);
-        return { ok: true, message: `${definition.name} opérationnel au niveau -${level + 1}.` };
+        logHistory(state, `${definition.name} construit au niveau -${level + 1}, coupe Y=${sectionY}.`);
+        return { ok: true, message: `${definition.name} opérationnel au niveau -${level + 1}, coupe ${sectionY + 1}.` };
     }
     SCPGame.buildUndergroundRoom = buildUndergroundRoom;
+    function setUndergroundSeal(state, roomId, sealed) {
+        const room = state.undergroundRooms.find((entry) => entry.id === roomId);
+        if (!room)
+            return { ok: false, message: "Module souterrain introuvable." };
+        if (room.sealed === sealed)
+            return { ok: true, message: "État déjà appliqué." };
+        room.sealed = sealed;
+        logHistory(state, `${SCPGame.getUndergroundDefinition(room.type).name} : ${sealed ? "secteur scellé" : "accès rétabli"}.`);
+        return { ok: true, message: sealed ? "Secteur scellé : circulation interdite." : "Secteur rouvert : itinéraires recalculés." };
+    }
+    SCPGame.setUndergroundSeal = setUndergroundSeal;
     function upgradeSelected(state) {
         if (!state.selectedId || !state.selectedType)
             return { ok: false, message: "Aucun élément sélectionné." };
@@ -3205,6 +4037,21 @@ var SCPGame;
             const room = state.undergroundRooms[index];
             if (room.scpId)
                 return { ok: false, message: "Transférez le SCP avant de démanteler sa cellule." };
+            if ((state.undergroundGates ?? []).some((gate) => gate.cycle && (gate.roomAId === room.id || gate.roomBId === room.id)))
+                return { ok: false, message: "Évacuez les sas actifs avant de démanteler cette galerie." };
+            if (state.staff.some((member) => member.status !== "dead" && member.position.layer === "underground"
+                && (member.position.level ?? member.position.y) === room.level
+                && Math.abs((member.position.sectionY ?? SCPGame.getLegacyUndergroundSectionY(state)) - SCPGame.undergroundRoomSectionY(state, room)) < 0.0001
+                && member.position.x >= room.x && member.position.x <= room.x + room.width))
+                return { ok: false, message: "Évacuez le personnel présent avant de démanteler ce module." };
+            for (const line of [...state.undergroundConduits ?? []]) {
+                if (line.roomAId === room.id || line.roomBId === room.id)
+                    SCPGame.removeUndergroundConduit(state, line.roomAId, line.roomBId);
+            }
+            for (const gate of [...state.undergroundGates ?? []]) {
+                if (gate.roomAId === room.id || gate.roomBId === room.id)
+                    SCPGame.removeUndergroundGate(state, gate.id);
+            }
             const definition = SCPGame.getUndergroundDefinition(room.type);
             state.undergroundRooms.splice(index, 1);
             SCPGame.addResource(state.resources, "funds", (definition.cost.funds ?? 0) * 0.3);
@@ -3298,8 +4145,10 @@ var SCPGame;
         const available = state.staff.filter((member) => !unavailable.includes(member.status));
         const assigned = new Set();
         const assignRole = (roomId, role, count, underground = false) => {
+            const undergroundRoom = underground ? state.undergroundRooms.find((entry) => entry.id === roomId) : undefined;
             const candidates = available
-                .filter((member) => member.role === role && !assigned.has(member.id))
+                .filter((member) => member.role === role && !assigned.has(member.id)
+                && (!undergroundRoom || member.clearance >= SCPGame.getUndergroundClearanceRequirement(undergroundRoom)))
                 .sort((a, b) => b.experience - a.experience);
             const selected = candidates.slice(0, count);
             selected.forEach((member) => {
@@ -3315,13 +4164,6 @@ var SCPGame;
                 }
             });
         };
-        state.surfaceRooms
-            .filter((room) => room.enabled)
-            .sort((a, b) => SCPGame.getSurfaceDefinition(b.type).security - SCPGame.getSurfaceDefinition(a.type).security)
-            .forEach((room) => {
-            const definition = SCPGame.getSurfaceDefinition(room.type);
-            Object.entries(definition.requiredRoles).forEach(([role, count]) => assignRole(room.id, role, count ?? 0, false));
-        });
         state.undergroundRooms
             .filter((room) => room.enabled && room.scpId)
             .forEach((room) => {
@@ -3330,6 +4172,13 @@ var SCPGame;
                 return;
             const definition = SCPGame.getSCPDefinition(scp.definitionId);
             Object.entries(definition.requirements.staff).forEach(([role, count]) => assignRole(room.id, role, count ?? 0, true));
+        });
+        state.surfaceRooms
+            .filter((room) => room.enabled)
+            .sort((a, b) => SCPGame.getSurfaceDefinition(b.type).security - SCPGame.getSurfaceDefinition(a.type).security)
+            .forEach((room) => {
+            const definition = SCPGame.getSurfaceDefinition(room.type);
+            Object.entries(definition.requiredRoles).forEach(([role, count]) => assignRole(room.id, role, count ?? 0, false));
         });
         available.filter((member) => !assigned.has(member.id)).forEach((member) => {
             member.assignmentRoomId = undefined;
@@ -3622,7 +4471,9 @@ var SCPGame;
         const point = (value) => shape(value, { x: finite, y: finite }, ["x", "y"]) && record(value)
             && Number(value.x) >= 0 && Number(value.x) < size("surfaceWidth") && Number(value.y) >= 0 && Number(value.y) < size("surfaceHeight");
         const layerPoint = (value) => {
-            if (!shape(value, { x: finite, y: finite, layer: oneOf(layers), level: integer(0, size("undergroundLevels") - 1) }, ["x", "y", "layer"]) || !record(value))
+            if (!shape(value, { x: finite, y: finite, layer: oneOf(layers),
+                level: integer(0, size("undergroundLevels") - 1),
+                sectionY: (v) => finite(v) && Number(v) >= 0 && Number(v) < size("surfaceHeight") }, ["x", "y", "layer"]) || !record(value))
                 return false;
             const width = size(value.layer === "surface" ? "surfaceWidth" : value.layer === "region" ? "regionWidth" : "undergroundWidth");
             const height = size(value.layer === "surface" ? "surfaceHeight" : value.layer === "region" ? "regionHeight" : "undergroundLevels");
@@ -3687,10 +4538,35 @@ var SCPGame;
             }
             return true;
         };
+        const undergroundGateCycle = (value) => shape(value, {
+            staffId: id, fromId: id, toId: id,
+            phase: oneOf(["equalizing", "crossing", "retreating"]), remaining: integer(0, 4)
+        }, ["staffId", "fromId", "toId", "phase", "remaining"]);
+        const undergroundGate = (value) => {
+            if (!shape(value, {
+                id, roomAId: id, roomBId: id, kind: oneOf(["door", "airlock"]), enabled: boolean,
+                minClearance: integer(0, 5), direction: oneOf(["both", "a-to-b", "b-to-a"]),
+                powered: boolean, airSupply: boolean, queueCapacity: integer(1, 8),
+                queue: array(id), cycle: undergroundGateCycle, passedCount: integer(0),
+                paidFunds: finite, paidParts: finite
+            }, ["id", "roomAId", "roomBId", "kind", "enabled", "minClearance", "direction", "powered", "airSupply",
+                "queueCapacity", "queue", "passedCount", "paidFunds", "paidParts"]) || !record(value))
+                return false;
+            const cost = SCPGame.UNDERGROUND_GATE_COSTS[value.kind];
+            return value.roomAId !== value.roomBId && value.queue.length <= Number(value.queueCapacity)
+                && new Set(value.queue).size === value.queue.length
+                && (value.kind === "airlock" || (value.queue.length === 0
+                    && (!value.cycle || value.cycle.phase !== "equalizing")))
+                && Number(value.paidFunds) >= 0 && Number(value.paidFunds) <= cost.funds
+                && Number(value.paidParts) >= 0 && Number(value.paidParts) <= cost.parts
+                && (!value.cycle || value.cycle.phase === "equalizing"
+                    || value.cycle.remaining === 0);
+        };
         const undergroundRoom = (value) => {
             if (!shape(value, {
                 id, type: oneOf(SCPGame.UNDERGROUND_ROOM_DEFINITIONS.map((entry) => entry.type)),
-                x: integer(0), level: integer(0, size("undergroundLevels") - 1), width: integer(1, 256),
+                x: integer(0), y: integer(0, size("surfaceHeight") - 1),
+                level: integer(0, size("undergroundLevels") - 1), width: integer(1, 256),
                 condition: finite, enabled: boolean, sealed: boolean, powerPriority: finite, name: text, scpId: text, ...roomArrays
             }, ["id", "type", "x", "level", "width", "condition"]) || !record(value))
                 return false;
@@ -3712,7 +4588,10 @@ var SCPGame;
             traits: stringArray, status: oneOf(statuses), position: layerPoint, target: layerPoint,
             targetRoomId: text, assignmentRoomId: text, path: array(point), pathIndex: integer(0),
             shift: oneOf(["day", "night"]), experience: finite, loyalty: finite, compromised: boolean, taskProgress: finite,
-            routeBlockedReason: (entry) => typeof entry === "string" && entry.length <= 512
+            routeBlockedReason: (entry) => typeof entry === "string" && entry.length <= 512,
+            undergroundLink: (entry) => shape(entry, {
+                fromId: id, toId: id, crossingX: finite
+            }, ["fromId", "toId", "crossingX"])
         }, ["id", "name", "role", "clearance", "salary", "skills", "needs", "traits", "status", "position", "experience"]);
         const scpIds = SCPGame.SCP_DEFINITIONS.map((entry) => entry.id);
         const scp = (value) => shape(value, {
@@ -3775,10 +4654,18 @@ var SCPGame;
             }),
             resources: (value) => numericRecord(value), reputation: (value) => numericRecord(value),
             regionFacilities: array(facility), surfaceRooms: array(surfaceRoom), undergroundRooms: array(undergroundRoom),
+            undergroundGates: array(undergroundGate),
+            undergroundConduits: array((value) => shape(value, {
+                roomAId: id, roomBId: id, power: boolean, water: boolean, air: boolean,
+                paidFunds: finite, paidParts: finite
+            }, ["roomAId", "roomBId", "power", "water", "air", "paidFunds", "paidParts"])
+                && record(value) && value.roomAId !== value.roomBId
+                && Number(value.paidFunds) >= 0 && Number(value.paidFunds) <= SCPGame.UNDERGROUND_CONDUIT_COST.funds
+                && Number(value.paidParts) >= 0 && Number(value.paidParts) <= SCPGame.UNDERGROUND_CONDUIT_COST.parts),
             staff: array(member), workItems: array(workItem), scps: array(scp), procedures: array(procedure),
             researchNodes: array((value) => shape(value, { id, completed: boolean }, ["id"])), events: array(event),
             campaign: array(chapter), notifications: array(notification), history: stringArray,
-            currentEventId: text, selectedId: text,
+            currentEventId: text, selectedId: text, activeInteriorFacilityId: text,
             selectedType: oneOf(["facility", "surface-room", "underground-room", "staff", "scp", "zone"]),
             flags: (value) => record(value) && Object.values(value).every(primitive),
             camera: (value) => shape(value, Object.fromEntries(views.map((view) => [view, camera]))),
@@ -3856,6 +4743,12 @@ var SCPGame;
         const defaults = createNewGame(mode, difficulty, seed);
         if (!hasValidLoadedFields(candidate, defaults))
             return undefined;
+        // A current-format save must not regain deleted/rejected circuits by
+        // pretending that its missing network is a historical omission.
+        const marker = raw.flags?.["load-schema-version"];
+        if (typeof marker === "number" && marker >= LOAD_SCHEMA_VERSION
+            && raw.undergroundConduits === undefined)
+            return undefined;
         const objectValue = (value, fallback) => value && typeof value === "object" && !Array.isArray(value) ? { ...fallback, ...value } : fallback;
         const arrayValue = (value, fallback) => Array.isArray(value) && value.every((entry) => entry && typeof entry === "object") ? value : fallback;
         const state = {
@@ -3870,6 +4763,9 @@ var SCPGame;
             regionFacilities: arrayValue(raw.regionFacilities, defaults.regionFacilities),
             surfaceRooms: arrayValue(raw.surfaceRooms, defaults.surfaceRooms),
             undergroundRooms: arrayValue(raw.undergroundRooms, defaults.undergroundRooms),
+            undergroundGates: arrayValue(raw.undergroundGates, []),
+            undergroundConduits: raw.undergroundConduits === undefined ? []
+                : arrayValue(raw.undergroundConduits, []),
             staff: arrayValue(raw.staff, defaults.staff),
             workItems: arrayValue(raw.workItems, defaults.workItems),
             scps: arrayValue(raw.scps, defaults.scps),
@@ -3900,6 +4796,9 @@ var SCPGame;
                 state.flags[`${key}:at`] = state.elapsedMinutes;
         });
         state.flags["load-schema-version"] = LOAD_SCHEMA_VERSION;
+        if (state.activeInteriorFacilityId && !state.regionFacilities.some((facility) => facility.id === state.activeInteriorFacilityId && SCPGame.isRegionFacilityEnterable(facility))) {
+            state.activeInteriorFacilityId = undefined;
+        }
         if (state.currentEventId && !state.events?.some((event) => event.id === state.currentEventId && !event.resolved))
             state.currentEventId = undefined;
         state.regionFacilities.forEach((facility) => {
@@ -3927,6 +4826,8 @@ var SCPGame;
         if (!hasValidSurfaceAccessReferences(state))
             return undefined;
         state.undergroundRooms.forEach((room) => {
+            // A historical room without Y belongs to the former single A-A cut.
+            room.y = SCPGame.undergroundRoomSectionY(state, room);
             room.staffAssigned = room.staffAssigned ?? [];
             room.upgrades = room.upgrades ?? [];
             room.enabled = room.enabled !== false;
@@ -3934,7 +4835,85 @@ var SCPGame;
             const tags = SCPGame.getUndergroundDefinition(room.type).tags;
             room.powerPriority = room.powerPriority ?? (tags.includes("keter") || tags.includes("bio") ? 3 : 2);
         });
+        // Old saves carried no service circuits, so fully commission exactly the
+        // existing contiguous links. New rooms always need explicit construction.
+        if (raw.undergroundConduits === undefined)
+            state.undergroundConduits = SCPGame.createLegacyUndergroundConduits(state);
+        const conduitKeys = new Set();
+        for (const conduit of state.undergroundConduits ?? []) {
+            const first = state.undergroundRooms.find((room) => room.id === conduit.roomAId);
+            const second = state.undergroundRooms.find((room) => room.id === conduit.roomBId);
+            const key = [conduit.roomAId, conduit.roomBId].sort().join(":");
+            if (!first || !second || !SCPGame.undergroundRoomsTouch(state, first, second)
+                || conduitKeys.has(key))
+                return undefined;
+            conduitKeys.add(key);
+        }
+        // An old save without gates remains an open physical corridor. Explicit
+        // gates are checked against actual adjacent modules, not just string IDs.
+        const memberById = new Map(state.staff.map((member) => [member.id, member]));
+        const gateIds = new Set();
+        const gateEdges = new Set();
+        const waitingIds = new Set();
+        for (const gate of state.undergroundGates ?? []) {
+            const from = state.undergroundRooms.find((room) => room.id === gate.roomAId);
+            const to = state.undergroundRooms.find((room) => room.id === gate.roomBId);
+            const key = [gate.roomAId, gate.roomBId].sort().join(':');
+            if (gateIds.has(gate.id) || gateEdges.has(key) || !from || !to
+                || from.level !== to.level || !SCPGame.undergroundRoomsTouch(state, from, to))
+                return undefined;
+            gateIds.add(gate.id);
+            gateEdges.add(key);
+            for (const id of [...gate.queue, ...(gate.cycle ? [gate.cycle.staffId] : [])]) {
+                const member = memberById.get(id);
+                if (!member || member.status === 'dead' || member.position.layer !== 'underground'
+                    || waitingIds.has(id))
+                    return undefined;
+                waitingIds.add(id);
+            }
+            if (gate.cycle) {
+                const cycle = gate.cycle;
+                const occupant = memberById.get(cycle.staffId);
+                if (!((cycle.fromId === from.id && cycle.toId === to.id)
+                    || (cycle.fromId === to.id && cycle.toId === from.id))
+                    || (occupant.position.level ?? occupant.position.y) !== from.level
+                    || occupant.position.x < Math.min(from.x, to.x) - 0.0001
+                    || occupant.position.x > Math.max(from.x + from.width, to.x + to.width) + 0.0001
+                    || (occupant.position.sectionY ?? SCPGame.getLegacyUndergroundSectionY(state))
+                        < Math.min(SCPGame.undergroundRoomSectionY(state, from), SCPGame.undergroundRoomSectionY(state, to)) - 0.0001
+                    || (occupant.position.sectionY ?? SCPGame.getLegacyUndergroundSectionY(state))
+                        > Math.max(SCPGame.undergroundRoomSectionY(state, from), SCPGame.undergroundRoomSectionY(state, to)) + 0.0001)
+                    return undefined;
+            }
+        }
+        const roomIds = new Set(state.undergroundRooms.map((room) => room.id));
+        for (const member of state.staff) {
+            const link = member.undergroundLink;
+            if (!link)
+                continue;
+            const from = state.undergroundRooms.find((room) => room.id === link.fromId);
+            const to = state.undergroundRooms.find((room) => room.id === link.toId);
+            const section = member.position.sectionY ?? SCPGame.getLegacyUndergroundSectionY(state);
+            if (!from || !to || member.position.layer !== "underground"
+                || from.level !== to.level || (member.position.level ?? member.position.y) !== from.level
+                || Math.abs(SCPGame.undergroundRoomSectionY(state, from) - SCPGame.undergroundRoomSectionY(state, to)) !== 1
+                || Math.min(from.x + from.width, to.x + to.width) <= Math.max(from.x, to.x)
+                || link.crossingX <= Math.max(from.x, to.x)
+                || link.crossingX >= Math.min(from.x + from.width, to.x + to.width)
+                || Math.abs(member.position.x - link.crossingX) > 0.0001
+                || section < Math.min(SCPGame.undergroundRoomSectionY(state, from), SCPGame.undergroundRoomSectionY(state, to))
+                || section > Math.max(SCPGame.undergroundRoomSectionY(state, from), SCPGame.undergroundRoomSectionY(state, to))) {
+                return undefined;
+            }
+        }
         state.staff.forEach((member, index) => {
+            if (member.position.layer === "underground" && member.position.sectionY === undefined)
+                member.position.sectionY = SCPGame.getLegacyUndergroundSectionY(state);
+            if (member.target?.layer === "underground" && member.target.sectionY === undefined)
+                member.target.sectionY = SCPGame.getLegacyUndergroundSectionY(state);
+            if (member.undergroundLink && (!roomIds.has(member.undergroundLink.fromId)
+                || !roomIds.has(member.undergroundLink.toId)))
+                member.undergroundLink = undefined;
             member.path = member.path ?? [];
             member.pathIndex = member.pathIndex ?? 0;
             member.shift = member.shift ?? (index % 3 === 0 ? "night" : "day");
@@ -4122,6 +5101,294 @@ var SCPGame;
     function getRoomCenter(room) {
         return { x: room.x + room.width / 2, y: room.y + room.height / 2 };
     }
+    const UNDERGROUND_MOVE_SPEED = 0.55;
+    const VERTICAL_TRANSFER_MINUTES = 4;
+    function undergroundPowerAvailable(state, shaft) {
+        return state.resources.power > 5 && !Boolean(state.flags["surface-blackout"])
+            && (!shaft || SCPGame.getUndergroundUtilityStatus(state, shaft).power);
+    }
+    function undergroundTransitStatus(member) {
+        if (!["injured", "quarantined", "dead"].includes(member.status))
+            member.status = "moving";
+    }
+    function staffIsAtUndergroundRoom(member, room) {
+        const point = SCPGame.undergroundRoomCenter(room);
+        return member.position.layer === "underground" && (member.position.level ?? member.position.y) === room.level
+            && Math.abs(member.position.x - point.x) < 0.0001
+            && Math.abs((member.position.sectionY ?? 14) - (room.y ?? 14)) < 0.0001;
+    }
+    SCPGame.staffIsAtUndergroundRoom = staffIsAtUndergroundRoom;
+    function undergroundRouteFailure(member) {
+        member.routeBlockedReason = "Galerie coupée, module scellé ou habilitation insuffisante";
+        undergroundTransitStatus(member);
+        member.status = "queued";
+        member.path = [];
+        member.pathIndex = 0;
+    }
+    function moveUndergroundX(member, destinationX) {
+        const delta = destinationX - member.position.x;
+        member.position.x += Math.sign(delta) * Math.min(Math.abs(delta), UNDERGROUND_MOVE_SPEED);
+        member.position.y = member.position.level ?? member.position.y;
+    }
+    // A transverse junction advances continuously in the third spatial axis.
+    // Save the junction IDs instead of recomputing a path from a fractional row.
+    function continueUndergroundLink(state, member) {
+        const link = member.undergroundLink;
+        if (!link || member.position.layer !== "underground")
+            return;
+        const from = state.undergroundRooms.find((room) => room.id === link.fromId);
+        const to = state.undergroundRooms.find((room) => room.id === link.toId);
+        const fromOpen = Boolean(from && SCPGame.canStaffEnterUndergroundRoom(from, member));
+        const toOpen = Boolean(to && SCPGame.canStaffEnterUndergroundRoom(to, member));
+        if (!fromOpen && !toOpen) {
+            member.routeBlockedReason = "Jonction inter-coupes isolée des deux côtés";
+            member.status = "queued";
+            return;
+        }
+        const allowed = Boolean(fromOpen && toOpen && from && to && SCPGame.areUndergroundRoomsConnected(from, to, state));
+        // A sector closed mid-crossing sends the member back along the same
+        // junction at normal walking speed, never instantaneously through rock.
+        const endpoint = allowed || !fromOpen ? to : from;
+        if (!endpoint) {
+            member.routeBlockedReason = "Coupe adjacente indisponible";
+            member.status = "queued";
+            return;
+        }
+        const goal = SCPGame.undergroundRoomSectionY(state, endpoint);
+        const here = member.position.sectionY ?? SCPGame.getLegacyUndergroundSectionY(state);
+        const remaining = goal - here;
+        member.position.sectionY = here + Math.sign(remaining) * Math.min(Math.abs(remaining), UNDERGROUND_MOVE_SPEED);
+        member.position.x = link.crossingX;
+        member.position.y = endpoint.level;
+        undergroundTransitStatus(member);
+        member.routeBlockedReason = allowed ? undefined : "Secteur fermé : retour à la coupe précédente";
+        if (Math.abs(member.position.sectionY - goal) < 0.0001) {
+            member.position.sectionY = goal;
+            member.undergroundLink = undefined;
+        }
+    }
+    // Follow x/sectionY/depth edges explicitly. Horizontal corridors share a
+    // wall, transverse corridors share an x interval and vertical ones share
+    // the same shaft footprint at consecutive depths.
+    function advanceUndergroundWalk(state, member, destination, intentId = destination.id) {
+        var _a;
+        if (member.undergroundLink) {
+            continueUndergroundLink(state, member);
+            return false;
+        }
+        const route = SCPGame.planUndergroundRoute(state, member.position, destination, member);
+        if (!route) {
+            undergroundRouteFailure(member);
+            return false;
+        }
+        member.routeBlockedReason = undefined;
+        const origin = route[0];
+        const next = route[1] ?? origin;
+        const nextPoint = SCPGame.undergroundRoomPosition(state, next);
+        const originPoint = SCPGame.undergroundRoomPosition(state, origin);
+        const wasTarget = member.target?.layer === "underground" && member.targetRoomId === intentId
+            && member.target.x === nextPoint.x && member.target.level === next.level
+            && member.target.sectionY === nextPoint.sectionY;
+        // Explicit airlock: queue at the origin center and equalize before the
+        // physical edge traversal. Gates belong to an edge, not to an entire room.
+        const gate = origin !== next ? SCPGame.getUndergroundGateBetween(state, origin, next) : undefined;
+        if (gate && origin.level === next.level) {
+            if (Math.abs(member.position.x - originPoint.x) > 0.0001) {
+                member.target = originPoint;
+                member.targetRoomId = intentId;
+                moveUndergroundX(member, originPoint.x);
+                undergroundTransitStatus(member);
+                return false;
+            }
+            member.target = nextPoint;
+            member.targetRoomId = intentId;
+            if (gate.kind === "airlock")
+                SCPGame.requestUndergroundGate(state, gate, member, origin, next);
+            else if (!gate.cycle) {
+                // A door also reserves the physical edge until the traveller clears
+                // its threshold. This prevents a late lock from admitting half a step.
+                gate.cycle = { staffId: member.id, fromId: origin.id,
+                    toId: next.id, phase: 'crossing', remaining: 0 };
+                undergroundTransitStatus(member);
+            }
+            else {
+                member.status = 'queued';
+                member.routeBlockedReason = 'Porte occupée — attente de franchissement';
+            }
+            return false;
+        }
+        undergroundTransitStatus(member);
+        member.path = route.slice(1).map(SCPGame.undergroundRoomCenter);
+        member.pathIndex = 0;
+        (_a = member.position).sectionY ?? (_a.sectionY = SCPGame.getLegacyUndergroundSectionY(state));
+        if (next.level !== (member.position.level ?? member.position.y)) {
+            if (Math.abs(member.position.x - originPoint.x) > 0.0001) {
+                member.target = originPoint;
+                member.targetRoomId = intentId;
+                member.taskProgress = 0;
+                moveUndergroundX(member, originPoint.x);
+                return false;
+            }
+            if (!wasTarget)
+                member.taskProgress = 0;
+            member.target = nextPoint;
+            member.targetRoomId = intentId;
+            if (!undergroundPowerAvailable(state, next)) {
+                member.routeBlockedReason = "Ascenseur ou puits sans circuit électrique actif";
+                return false;
+            }
+            member.taskProgress = Math.min(100, member.taskProgress + 100 / VERTICAL_TRANSFER_MINUTES);
+            if (member.taskProgress < 100)
+                return false;
+            member.position = { ...nextPoint };
+            member.taskProgress = 0;
+            return false;
+        }
+        const originY = SCPGame.undergroundRoomSectionY(state, origin);
+        const nextY = SCPGame.undergroundRoomSectionY(state, next);
+        if (originY !== nextY) {
+            const left = Math.max(origin.x, next.x);
+            const right = Math.min(origin.x + origin.width, next.x + next.width);
+            // Keep the crossing inside the shared opening. The midpoint gives a
+            // deterministic portal when re-routing a staffed, saved installation.
+            const crossingX = (left + right) / 2;
+            if (Math.abs(member.position.x - crossingX) > 0.0001) {
+                member.target = { ...originPoint, x: crossingX };
+                member.targetRoomId = intentId;
+                member.taskProgress = 0;
+                moveUndergroundX(member, crossingX);
+                return false;
+            }
+            member.undergroundLink = { fromId: origin.id, toId: next.id, crossingX };
+            member.target = { ...nextPoint, x: crossingX };
+            member.targetRoomId = intentId;
+            member.taskProgress = 0;
+            continueUndergroundLink(state, member);
+            return false;
+        }
+        // A member already at a cell does not reset accumulated experience.
+        if (staffIsAtUndergroundRoom(member, destination)) {
+            member.target = SCPGame.undergroundRoomPosition(state, destination);
+            member.targetRoomId = intentId;
+            member.path = [];
+            member.pathIndex = 0;
+            member.status = "working";
+            return true;
+        }
+        member.taskProgress = 0;
+        member.target = nextPoint;
+        member.targetRoomId = intentId;
+        moveUndergroundX(member, nextPoint.x);
+        if (!staffIsAtUndergroundRoom(member, destination))
+            return false;
+        member.path = [];
+        member.pathIndex = 0;
+        member.status = "working";
+        return true;
+    }
+    function selectUndergroundEntry(state, member, destination) {
+        let selected;
+        let best = Infinity;
+        for (const portal of SCPGame.getUndergroundPortals(state)) {
+            const below = SCPGame.planUndergroundRoute(state, SCPGame.undergroundRoomPosition(state, portal.shaft), destination, member);
+            if (!below)
+                continue;
+            const above = planSurfaceRoute(state, member.position, portal.elevator, member);
+            if (above === undefined)
+                continue;
+            const distance = above.length + below.length * 2
+                + Math.abs(SCPGame.undergroundRoomCenter(destination).x - SCPGame.undergroundRoomCenter(portal.shaft).x) / 2
+                + Math.abs(SCPGame.undergroundRoomSectionY(state, destination) - SCPGame.undergroundRoomSectionY(state, portal.shaft)) * 3;
+            if (distance < best) {
+                best = distance;
+                selected = portal;
+            }
+        }
+        return selected;
+    }
+    // targetRoomId stores the destination and target stores the chosen shaft.
+    // Both fields (and taskProgress) already survive save/load; no new schema.
+    function continueUndergroundDescent(state, member) {
+        const destination = state.undergroundRooms.find((room) => room.id === member.targetRoomId);
+        const target = member.target;
+        if (!destination || target?.layer !== "underground") {
+            clearStaffRoute(member);
+            member.taskProgress = 0;
+            undergroundRouteFailure(member);
+            return;
+        }
+        const portal = SCPGame.getUndergroundPortals(state).find(({ elevator, shaft }) => Math.abs(SCPGame.undergroundRoomCenter(shaft).x - target.x) < 0.0001
+            && (target.sectionY ?? SCPGame.getLegacyUndergroundSectionY(state)) === SCPGame.undergroundRoomSectionY(state, shaft)
+            && SCPGame.pointInRect(member.position, elevator.x, elevator.y, elevator.width, elevator.height));
+        if (!portal || !SCPGame.planUndergroundRoute(state, SCPGame.undergroundRoomPosition(state, portal.shaft), destination, member)) {
+            member.routeBlockedReason = "Ascenseur ou réseau profond indisponible";
+            undergroundTransitStatus(member);
+            return;
+        }
+        undergroundTransitStatus(member);
+        if (!undergroundPowerAvailable(state, portal.shaft)) {
+            member.routeBlockedReason = "Ascenseur ou puits sans circuit électrique actif";
+            return;
+        }
+        member.routeBlockedReason = undefined;
+        member.taskProgress = Math.min(100, member.taskProgress + 100 / VERTICAL_TRANSFER_MINUTES);
+        if (member.taskProgress < 100)
+            return;
+        member.position = SCPGame.undergroundRoomPosition(state, portal.shaft);
+        member.taskProgress = 0;
+        clearStaffRoute(member);
+    }
+    function chooseUndergroundReturnPortal(state, member) {
+        let selected;
+        let best = Infinity;
+        for (const portal of SCPGame.getUndergroundPortals(state)) {
+            const route = SCPGame.planUndergroundRoute(state, member.position, portal.shaft, member);
+            if (!route)
+                continue;
+            // Preserve the selected return lift through a pause or save/load.
+            const preferred = portal.elevator.id === member.targetRoomId ? -1000 : 0;
+            const score = route.length * 2
+                + Math.abs(member.position.x - SCPGame.undergroundRoomCenter(portal.shaft).x)
+                + Math.abs((member.position.sectionY ?? SCPGame.getLegacyUndergroundSectionY(state))
+                    - SCPGame.undergroundRoomSectionY(state, portal.shaft)) * 3 + preferred;
+            if (score < best) {
+                best = score;
+                selected = portal;
+            }
+        }
+        return selected;
+    }
+    function advanceUndergroundReturn(state, member) {
+        const portal = chooseUndergroundReturnPortal(state, member);
+        if (!portal) {
+            undergroundRouteFailure(member);
+            return;
+        }
+        const surfacePoint = getRoomCenter(portal.elevator);
+        if (!staffIsAtUndergroundRoom(member, portal.shaft)) {
+            advanceUndergroundWalk(state, member, portal.shaft, portal.elevator.id);
+            return;
+        }
+        const continuing = member.target?.layer === "surface" && member.targetRoomId === portal.elevator.id;
+        if (!continuing)
+            member.taskProgress = 0;
+        member.target = { layer: "surface", ...surfacePoint };
+        member.targetRoomId = portal.elevator.id;
+        member.path = [];
+        member.pathIndex = 0;
+        undergroundTransitStatus(member);
+        if (!undergroundPowerAvailable(state, portal.shaft)) {
+            member.routeBlockedReason = "Ascenseur ou puits sans circuit électrique actif";
+            return;
+        }
+        member.routeBlockedReason = undefined;
+        member.taskProgress = Math.min(100, member.taskProgress + 100 / VERTICAL_TRANSFER_MINUTES);
+        if (member.taskProgress < 100)
+            return;
+        member.position = { layer: "surface", ...surfacePoint };
+        member.taskProgress = 0;
+        clearStaffRoute(member);
+    }
     // Routes are derived from the current map. A loaded save has no cache entry,
     // so its serialized waypoints are rebuilt before the first movement.
     const staffRouteCache = new WeakMap();
@@ -4287,6 +5554,7 @@ var SCPGame;
                 return sum;
             return sum + SCPGame.getSCPDefinition(scp.definitionId).moraleEffect;
         }, 0);
+        SCPGame.maintainUndergroundGates(state);
         state.staff.forEach((member) => {
             if (member.status === "dead")
                 return;
@@ -4306,8 +5574,29 @@ var SCPGame;
                 member.needs.fatigue = SCPGame.clamp(member.needs.fatigue + 0.018, 0, 100);
                 return;
             }
+            if (member.position.layer === "underground" && SCPGame.processUndergroundGateCycle(state, member)) {
+                member.needs.hunger = SCPGame.clamp(member.needs.hunger + 0.022, 0, 100);
+                member.needs.fatigue = SCPGame.clamp(member.needs.fatigue + 0.018, 0, 100);
+                return;
+            }
+            if (member.position.layer === "underground" && member.undergroundLink) {
+                continueUndergroundLink(state, member);
+                member.needs.hunger = SCPGame.clamp(member.needs.hunger + 0.022, 0, 100);
+                member.needs.fatigue = SCPGame.clamp(member.needs.fatigue + 0.018, 0, 100);
+                return;
+            }
+            // An already admitted lift transit finishes before a shift/need change.
+            if (member.position.layer === "surface" && member.target?.layer === "underground"
+                && state.undergroundRooms.some((room) => room.id === member.targetRoomId)) {
+                continueUndergroundDescent(state, member);
+                return;
+            }
             const onShift = isOnShift(member, state.minuteOfDay);
             const difficulty = SCPGame.getDifficultyMultiplier(state.settings.difficulty);
+            if (!onShift && member.position.layer === "underground") {
+                advanceUndergroundReturn(state, member);
+                return;
+            }
             if (!onShift && member.status !== "training" && member.status !== "injured" && member.status !== "quarantined") {
                 member.status = "off-duty";
                 member.needs.fatigue = SCPGame.clamp(member.needs.fatigue - 0.07, 0, 100);
@@ -4344,6 +5633,7 @@ var SCPGame;
             }
             let service;
             let assignedRoom;
+            let assignedUndergroundRoom;
             let activity = "working";
             if (member.status === "quarantined") {
                 service = "quarantine";
@@ -4366,20 +5656,32 @@ var SCPGame;
                     assignedRoom = surfaceRoom;
                 }
                 else if (undergroundRoom) {
-                    clearStaffRoute(member);
-                    member.position = { layer: "underground", x: undergroundRoom.x + undergroundRoom.width / 2, y: undergroundRoom.level, level: undergroundRoom.level };
-                    member.status = "working";
-                    applyWorkFatigue(member, undergroundRoom.scpId ? 1.4 : 1);
-                    return;
+                    assignedUndergroundRoom = undergroundRoom;
+                    if (member.position.layer === "surface") {
+                        const entry = selectUndergroundEntry(state, member, undergroundRoom);
+                        if (!entry) {
+                            clearStaffRoute(member);
+                            undergroundRouteFailure(member);
+                            member.routeBlockedReason = "Aucun ascenseur et galerie accessibles pour cette habilitation";
+                            return;
+                        }
+                        assignedRoom = entry.elevator;
+                    }
                 }
             }
             else {
                 service = member.role === "researcher" ? "research" : member.role === "engineer" ? "repair" : member.role === "medic" ? "medical" : member.role === "guard" || member.role === "mtf" ? "security" : member.role === "logistics" ? "logistics" : "administration";
             }
-            if (member.position.layer === "underground" && (service || assignedRoom?.enabled)) {
-                const elevator = state.surfaceRooms.find((room) => room.type === "elevator" && room.enabled);
-                member.position = elevator ? { layer: "surface", ...getRoomCenter(elevator) } : { layer: "surface", x: 22, y: 14 };
-                clearStaffRoute(member);
+            if (member.position.layer === "underground") {
+                if (assignedUndergroundRoom && !service) {
+                    if (advanceUndergroundWalk(state, member, assignedUndergroundRoom)) {
+                        applyWorkFatigue(member, assignedUndergroundRoom.scpId ? 1.4 : 1);
+                    }
+                }
+                else {
+                    advanceUndergroundReturn(state, member);
+                }
+                return;
             }
             const desiredRoom = chooseStaffDestination(state, member, topology, service, assignedRoom);
             if (desiredRoom && (member.status === "injured" || member.status === "quarantined")) {
@@ -4408,6 +5710,20 @@ var SCPGame;
                     member.position.x += dx / distance * speed;
                     member.position.y += dy / distance * speed;
                 }
+            }
+            if (desiredRoom && assignedUndergroundRoom && staffHasArrived(member, desiredRoom)) {
+                const entry = selectUndergroundEntry(state, member, assignedUndergroundRoom);
+                if (entry && entry.elevator.id === desiredRoom.id) {
+                    member.target = SCPGame.undergroundRoomPosition(state, entry.shaft);
+                    member.targetRoomId = assignedUndergroundRoom.id;
+                    member.taskProgress = 0;
+                    member.path = [];
+                    member.pathIndex = 0;
+                    member.status = "moving";
+                    return;
+                }
+                undergroundRouteFailure(member);
+                return;
             }
             if (desiredRoom && staffHasArrived(member, desiredRoom)) {
                 if (member.status === "injured" || member.status === "quarantined") {
@@ -4699,17 +6015,27 @@ var SCPGame;
         score += (room.condition - 60) * 0.22;
         const assignedMembers = room.staffAssigned
             .map((id) => state.staff.find((member) => member.id === id))
-            .filter((member) => Boolean(member && !["dead", "off-duty", "injured", "quarantined", "training"].includes(member.status)));
+            .filter((member) => Boolean(member && member.status === "working"
+            && SCPGame.canStaffEnterUndergroundRoom(room, member) && staffIsAtUndergroundRoom(member, room)));
         const requiredStaff = Object.values(scpDefinition.requirements.staff).reduce((sum, count) => sum + (count ?? 0), 0);
         const plannedStaff = Math.max(requiredStaff, procedure.assignedStaff);
         score += plannedStaff === 0 ? 8 : SCPGame.clamp(assignedMembers.length / plannedStaff * 15, 0, 18);
         const avgTraining = assignedMembers.length ? assignedMembers.reduce((sum, member) => sum + member.experience, 0) / assignedMembers.length : 0;
         score += SCPGame.clamp((avgTraining - procedure.trainingRequired) * 0.15, -12, 8);
+        const utilities = SCPGame.getUndergroundUtilityStatus(state, room);
         const powerRatio = state.resources.powerCapacity > 0 ? state.resources.power / state.resources.powerCapacity : 0;
-        if (powerRatio >= scpDefinition.requirements.powerReliability)
+        if (!utilities.power)
+            score -= 36;
+        else if (powerRatio >= scpDefinition.requirements.powerReliability)
             score += 10;
         else
             score -= (scpDefinition.requirements.powerReliability - powerRatio) * 35;
+        // Life support and water cooling are local services. Global reserves do
+        // not travel across a broken cable, valve or absent physical duct.
+        if (!utilities.air)
+            score -= 26;
+        if (roomDefinition.waterUse > 0 && !utilities.water)
+            score -= 12;
         const flags = scpDefinition.requirements.procedureFlags;
         if (flags.includes("backup-power"))
             score += procedure.backupPower ? 6 : -12;
@@ -4841,8 +6167,13 @@ var SCPGame;
                 intel += 0.3 * efficiency;
             }
         });
+        const undergroundUtilities = SCPGame.getUndergroundUtilityMap(state);
         state.undergroundRooms.filter((room) => room.type === "research-lab" && room.enabled).forEach((room) => {
-            research += 0.5 * room.condition / 100;
+            const utilities = undergroundUtilities.get(room.id);
+            // Research equipment needs electricity and climate control; power
+            // stored at the Site does not run a disconnected laboratory.
+            if (utilities?.power && utilities.air)
+                research += 0.5 * room.condition / 100;
         });
         state.resources.research += research;
         state.resources.intel += intel;
@@ -5652,17 +6983,89 @@ var SCPGame;
         drawRegionalCity(ctx, runtime, width, height);
         const facilities = [...state.regionFacilities].sort((a, b) => (a.x + a.y) - (b.x + b.y));
         facilities.forEach((facility) => drawRegionFacility(ctx, runtime, facility, width));
+        drawRegionSiteCampus(runtime, width);
         if (hover && state.view === "region") {
             const point = regionToScreen(runtime, width, hover.x, hover.y);
             const valid = hover.x >= 0 && hover.y >= 0 && hover.x < state.regionWidth && hover.y < state.regionHeight;
             drawDiamond(ctx, point, metrics.tileW, metrics.tileH, valid ? "rgba(106,210,175,.22)" : "rgba(230,92,92,.22)", valid ? "#72d2b0" : "#e05c5c");
         }
-        drawCanvasTitle(ctx, "RÉGION ET COUVERTURE", "Routes publiques, fournisseurs, réseaux, ville et discrétion opérationnelle", width);
+        drawCanvasTitle(ctx, "RÉGION ET SITE", "Vue extérieure : ville, annexes et toitures du même complexe intérieur", width);
         drawLegend(ctx, width, height, [
             ["Couverture", Math.round(state.reputation.cover), "#73c9a3"],
             ["Suspicion", Math.round(state.reputation.suspicion), "#e58b65"],
             ["Installations", state.regionFacilities.length, "#9ab7cf"]
         ]);
+    }
+    function drawRegionSiteCampus(runtime, width) {
+        const state = runtime.state;
+        const ctx = runtime.context;
+        const bounds = SCPGame.getSiteRegionFootprint(state);
+        const metrics = regionMetrics(runtime, width);
+        const polygon = (x, y, w, h) => {
+            const a = regionToScreen(runtime, width, x, y);
+            const b = regionToScreen(runtime, width, x + w, y);
+            const c = regionToScreen(runtime, width, x + w, y + h);
+            const d = regionToScreen(runtime, width, x, y + h);
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.lineTo(c.x, c.y);
+            ctx.lineTo(d.x, d.y);
+            ctx.closePath();
+        };
+        // Exterior shell and roofs are 100% derived from the current surface-room
+        // collection: building/removing a room immediately updates its roof.
+        ctx.save();
+        polygon(bounds.x, bounds.y, bounds.width, bounds.height);
+        ctx.fillStyle = "rgba(11,24,31,.96)";
+        ctx.strokeStyle = "rgba(104,221,194,.95)";
+        ctx.lineWidth = 2;
+        ctx.fill();
+        ctx.stroke();
+        const rooms = [...state.surfaceRooms].sort((a, b) => (a.type === "corridor" ? -1 : 0) - (b.type === "corridor" ? -1 : 0));
+        for (const room of rooms) {
+            const roof = SCPGame.getSurfaceRegionFootprint(state, room);
+            const selected = state.selectedType === "surface-room" && state.selectedId === room.id;
+            polygon(roof.x, roof.y, roof.width, roof.height);
+            ctx.fillStyle = room.type === "corridor" ? "rgba(80,95,103,.85)" : SURFACE_COLORS[room.type];
+            ctx.globalAlpha = room.enabled ? 0.87 : 0.28;
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = selected ? "#fff1a5" : "rgba(227,241,237,.34)";
+            ctx.lineWidth = selected ? 2.5 : 0.7;
+            ctx.stroke();
+            if (selected || room.type === "elevator") {
+                const center = regionToScreen(runtime, width, roof.x + roof.width / 2, roof.y + roof.height / 2);
+                ctx.fillStyle = selected ? "#fff1a5" : "#d0e7fa";
+                ctx.font = "700 12px system-ui";
+                ctx.textAlign = "center";
+                ctx.fillText(selected ? SCPGame.getSurfaceDefinition(room.type).name : "⇩", center.x, center.y - 5);
+            }
+        }
+        const label = regionToScreen(runtime, width, bounds.x + bounds.width / 2, bounds.y + bounds.height + 0.5);
+        ctx.globalAlpha = 1;
+        ctx.textAlign = "center";
+        ctx.font = "700 11px system-ui";
+        ctx.fillStyle = "#bcebdc";
+        ctx.fillText("SITE PRINCIPAL · TOITURES", label.x, label.y);
+        ctx.font = "10px system-ui";
+        ctx.fillStyle = "rgba(209,233,227,.82)";
+        ctx.fillText(`${state.surfaceRooms.filter((room) => room.type !== "corridor").length} salles reliées au plan intérieur`, label.x, label.y + 13);
+        // Three-scale reference: horizontal x is maintained in all projections.
+        const section = SCPGame.getSiteSectionSurfaceY(state);
+        const p1 = SCPGame.surfaceToRegionPosition(state, { x: 0, y: section });
+        const p2 = SCPGame.surfaceToRegionPosition(state, { x: state.surfaceWidth, y: section });
+        const a = regionToScreen(runtime, width, p1.x, p1.y);
+        const b = regionToScreen(runtime, width, p2.x, p2.y);
+        ctx.strokeStyle = "rgba(255,214,120,.8)";
+        ctx.lineWidth = Math.max(1, metrics.tileW / 45);
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
     }
     function drawRegionalCity(ctx, runtime, width, height) {
         const metrics = regionMetrics(runtime, width);
@@ -5741,6 +7144,11 @@ var SCPGame;
     function drawSurface(runtime, width, height) {
         const state = runtime.state;
         const ctx = runtime.context;
+        const annex = SCPGame.getActiveInteriorFacility(state);
+        if (annex) {
+            drawAnnexInterior(runtime, annex, width, height);
+            return;
+        }
         const metrics = surfaceMetrics(runtime, width, height);
         const totalW = state.surfaceWidth * metrics.cell;
         const totalH = state.surfaceHeight * metrics.cell;
@@ -5762,6 +7170,7 @@ var SCPGame;
         }
         [...state.surfaceRooms].sort((a, b) => a.type === "corridor" ? -1 : b.type === "corridor" ? 1 : 0).forEach((room) => drawSurfaceRoom(ctx, runtime, room, metrics));
         state.surfaceRooms.forEach((room) => drawSurfaceAccesses(ctx, runtime, room, metrics));
+        drawSiteSurfaceSection(ctx, runtime, metrics);
         drawSurfaceStaff(ctx, runtime, metrics);
         if (runtime.hoveredCell) {
             const hover = runtime.hoveredCell;
@@ -5775,7 +7184,7 @@ var SCPGame;
             ctx.fillRect(metrics.originX + hover.x * metrics.cell, metrics.originY + hover.y * metrics.cell, w * metrics.cell, h * metrics.cell);
             ctx.strokeRect(metrics.originX + hover.x * metrics.cell, metrics.originY + hover.y * metrics.cell, w * metrics.cell, h * metrics.cell);
         }
-        drawCanvasTitle(ctx, "COMPLEXE DE SURFACE", "Accès contrôlés, sas, files et personnel", width);
+        drawCanvasTitle(ctx, "INTÉRIEUR DU SITE", "Même bâtiment que la vue Région · plan des pièces · coupe A-A vers le sous-sol", width);
         const queues = state.surfaceRooms.reduce((sum, room) => sum + room.queue.length
             + SCPGame.getSurfaceAccesses(state, room).reduce((waiting, access) => waiting + access.queue.length, 0), 0) + state.workItems.length;
         drawLegend(ctx, width, height, [
@@ -5783,6 +7192,100 @@ var SCPGame;
             ["Files", queues, queues > 12 ? "#e36e68" : "#d5bd6a"],
             ["Énergie", Math.round(state.resources.power), "#d6c868"]
         ]);
+    }
+    function drawAnnexInterior(runtime, facility, width, height) {
+        const state = runtime.state;
+        const ctx = runtime.context;
+        const plan = SCPGame.getAnnexInteriorPlan(state, facility);
+        if (!plan)
+            return;
+        const metrics = surfaceMetrics(runtime, width, height);
+        const palette = {
+            operations: "#2d646b", control: "#395e86", support: "#665d49", entry: "#43685a"
+        };
+        const cell = metrics.cell;
+        const px = metrics.originX + plan.footprint.x * cell;
+        const py = metrics.originY + plan.footprint.y * cell;
+        const pw = plan.footprint.width * cell;
+        const ph = plan.footprint.height * cell;
+        ctx.fillStyle = "#18232a";
+        ctx.fillRect(px - 12, py - 12, pw + 24, ph + 24);
+        ctx.strokeStyle = "#b9d4cf";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(px - 2, py - 2, pw + 4, ph + 4);
+        for (const zone of plan.rooms) {
+            const x = metrics.originX + zone.x * cell;
+            const y = metrics.originY + zone.y * cell;
+            const w = zone.width * cell;
+            const h = zone.height * cell;
+            const selected = state.flags["annex-room-selected"] === zone.id;
+            ctx.fillStyle = facility.enabled ? palette[zone.category] : "#3c4346";
+            ctx.fillRect(x + 2, y + 2, w - 4, h - 4);
+            ctx.fillStyle = "rgba(255,255,255,.065)";
+            for (let step = 0; step < 3; step += 1) {
+                const slot = w * (0.23 + step * 0.25);
+                ctx.fillRect(x + slot - 4, y + h * 0.25, 8, Math.max(4, h * 0.12));
+            }
+            ctx.strokeStyle = selected ? "#ffde99" : "rgba(222,242,237,.57)";
+            ctx.lineWidth = selected ? 3 : 1.5;
+            ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+            ctx.textAlign = "center";
+            ctx.fillStyle = "#f4f8f6";
+            ctx.font = "700 10px system-ui";
+            const parts = zone.name.split(" ");
+            const mid = Math.ceil(parts.length / 2);
+            ctx.fillText(parts.slice(0, mid).join(" ").slice(0, 25), x + w / 2, y + h / 2 - 4);
+            ctx.fillText(parts.slice(mid).join(" ").slice(0, 25), x + w / 2, y + h / 2 + 10);
+        }
+        ctx.textAlign = "left";
+        // The schematic's global volume is linked to the actual regional object;
+        // these four zones are explanatory, not extra production or employee slots.
+        ctx.fillStyle = "rgba(14,22,26,.92)";
+        ctx.fillRect(px, py - 34, pw, 24);
+        ctx.fillStyle = "#c9ede3";
+        ctx.font = "700 12px system-ui";
+        ctx.fillText(`ANNEXE ${facility.id.slice(-6).toUpperCase()} · NIV. ${facility.level}`, px + 7, py - 18);
+        drawCanvasTitle(ctx, "INTÉRIEUR DE L'ANNEXE", `${plan.buildingName} · bâtiment de la Région · état ${Math.round(facility.condition)} %`, width);
+        drawLegend(ctx, width, height, [
+            ["Zones", plan.rooms.length, "#7bcab5"],
+            ["État", Math.round(facility.condition), facility.condition < 45 ? "#e36e68" : "#73c9a3"],
+            ["Niveau", facility.level, "#9ab7cf"]
+        ]);
+    }
+    function drawSiteSurfaceSection(ctx, runtime, metrics) {
+        const state = runtime.state;
+        const y = metrics.originY + (SCPGame.getSiteSectionSurfaceY(state) + 0.5) * metrics.cell;
+        ctx.save();
+        ctx.strokeStyle = "rgba(255,206,118,.7)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(metrics.originX, y);
+        ctx.lineTo(metrics.originX + state.surfaceWidth * metrics.cell, y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = "rgba(13,22,27,.9)";
+        ctx.fillRect(metrics.originX + 4, y - 21, 118, 16);
+        ctx.fillStyle = "#ffdda0";
+        ctx.font = "700 10px system-ui";
+        ctx.fillText(`COUPE Y=${SCPGame.getSiteSectionSurfaceY(state)} · ${SCPGame.getSiteSectionSurfaceY(state) + 1}/${state.surfaceHeight}`, metrics.originX + 9, y - 9);
+        for (const portal of SCPGame.getUndergroundPortals(state)) {
+            const center = SCPGame.undergroundXToSurfaceX(state, portal.shaft.x + portal.shaft.width / 2);
+            const x = metrics.originX + center * metrics.cell;
+            ctx.beginPath();
+            ctx.arc(x, y, Math.max(5, metrics.cell * 0.18), 0, Math.PI * 2);
+            ctx.fillStyle = "#c5f7e5";
+            ctx.fill();
+            ctx.strokeStyle = "#17353d";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.fillStyle = "#12323a";
+            ctx.textAlign = "center";
+            ctx.font = "700 9px system-ui";
+            ctx.fillText("⇅", x, y + 3);
+        }
+        ctx.textAlign = "left";
+        ctx.restore();
     }
     function drawSurfaceRoom(ctx, runtime, room, metrics) {
         const state = runtime.state;
@@ -5988,7 +7491,7 @@ var SCPGame;
             ctx.stroke();
             ctx.fillStyle = "rgba(217,226,226,.45)";
             ctx.font = "10px system-ui";
-            ctx.fillText(`NIVEAU -${level + 1}`, metrics.originX - 70, y + metrics.levelH / 2 + 3);
+            ctx.fillText(`NIVEAU -${level + 1}`, Math.max(10, metrics.originX - 70), y + metrics.levelH / 2 + 3);
             for (let x = 0; x < state.undergroundWidth; x += 1) {
                 if ((x + level * 3) % 7 === 0) {
                     ctx.fillStyle = "rgba(120,110,96,.08)";
@@ -5998,8 +7501,106 @@ var SCPGame;
                 }
             }
         }
-        state.undergroundRooms.forEach((room) => drawUndergroundRoom(ctx, runtime, room, metrics));
+        drawUndergroundSurfaceStrip(ctx, runtime, metrics);
+        const cut = SCPGame.getSiteSectionSurfaceY(state);
+        const visibleRooms = state.undergroundRooms.filter((room) => SCPGame.undergroundRoomSectionY(state, room) === cut);
+        const utilityMap = SCPGame.getUndergroundUtilityMap(state);
+        visibleRooms.forEach((room) => drawUndergroundRoom(ctx, runtime, room, metrics, utilityMap));
+        // Junctions across the current cut are visible; neighbouring transverse
+        // links have directional markers, not fictitious on-screen corridors.
+        const accessible = visibleRooms.filter((room) => SCPGame.canStaffEnterUndergroundRoom(room));
+        for (let i = 0; i < accessible.length; i += 1) {
+            for (let j = i + 1; j < accessible.length; j += 1) {
+                const a = accessible[i], b = accessible[j];
+                if (!SCPGame.areUndergroundRoomsConnected(a, b, state))
+                    continue;
+                if (a.level === b.level) {
+                    const boundary = a.x + a.width === b.x ? b.x : a.x;
+                    ctx.fillStyle = "rgba(129,226,193,.85)";
+                    ctx.fillRect(metrics.originX + boundary * metrics.cellW - 2, metrics.originY + a.level * metrics.levelH + metrics.levelH * 0.48 - 5, 4, 10);
+                }
+                else {
+                    const x = metrics.originX + (a.x + a.width / 2) * metrics.cellW;
+                    const top = metrics.originY + Math.min(a.level, b.level) * metrics.levelH;
+                    ctx.strokeStyle = "rgba(129,226,193,.85)";
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(x, top + metrics.levelH - 12);
+                    ctx.lineTo(x, top + metrics.levelH + 7);
+                    ctx.stroke();
+                }
+            }
+        }
+        // Report transverse exits on this cut so a player can trace branches.
+        for (const room of accessible) {
+            for (const other of state.undergroundRooms) {
+                if (other === room || SCPGame.undergroundRoomSectionY(state, other) === cut
+                    || !SCPGame.areUndergroundRoomsConnected(room, other, state))
+                    continue;
+                const midpoint = (Math.max(room.x, other.x)
+                    + Math.min(room.x + room.width, other.x + other.width)) / 2;
+                const x = metrics.originX + midpoint * metrics.cellW;
+                const y = metrics.originY + room.level * metrics.levelH
+                    + (SCPGame.undergroundRoomSectionY(state, other) > cut ? metrics.levelH * 0.83 : metrics.levelH * 0.17);
+                ctx.fillStyle = "#bee6cf";
+                ctx.font = "700 14px system-ui";
+                ctx.fillText(SCPGame.undergroundRoomSectionY(state, other) > cut ? "↓" : "↑", x - 5, y);
+            }
+        }
+        // A gate remains visible even when locked, unlike a missing corridor.
+        for (const gate of state.undergroundGates ?? []) {
+            const a = visibleRooms.find((room) => room.id === gate.roomAId);
+            const b = visibleRooms.find((room) => room.id === gate.roomBId);
+            if (!a || !b || a.level !== b.level)
+                continue;
+            const boundary = a.x + a.width === b.x ? b.x : b.x + b.width === a.x ? a.x : (Math.max(a.x, b.x) + Math.min(a.x + a.width, b.x + b.width)) / 2;
+            const x = metrics.originX + boundary * metrics.cellW;
+            const y = metrics.originY + a.level * metrics.levelH + metrics.levelH * .48;
+            const open = SCPGame.canTraverseUndergroundGate(state, a, b);
+            ctx.save();
+            ctx.fillStyle = open ? (gate.kind === 'airlock' ? '#eccf87' : '#9ed6c9') : '#e57372';
+            ctx.strokeStyle = '#172a30';
+            ctx.lineWidth = 1.3;
+            ctx.fillRect(x - 5, y - 9, 10, 18);
+            ctx.strokeRect(x - 5, y - 9, 10, 18);
+            if (gate.kind === 'airlock') {
+                ctx.beginPath();
+                ctx.moveTo(x - 2, y - 6);
+                ctx.lineTo(x - 2, y + 6);
+                ctx.moveTo(x + 2, y - 6);
+                ctx.lineTo(x + 2, y + 6);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+        // Transverse gate thresholds must stay visible on this cut even when a
+        // lockdown hides the normal green arrow into the neighbouring Y slice.
+        for (const gate of state.undergroundGates ?? []) {
+            const a = state.undergroundRooms.find((room) => room.id === gate.roomAId);
+            const b = state.undergroundRooms.find((room) => room.id === gate.roomBId);
+            if (!a || !b || a.level !== b.level)
+                continue;
+            const ay = SCPGame.undergroundRoomSectionY(state, a);
+            const by = SCPGame.undergroundRoomSectionY(state, b);
+            if (ay === by || Math.abs(ay - by) !== 1 || (ay !== cut && by !== cut))
+                continue;
+            const visible = ay === cut ? a : b;
+            const other = ay === cut ? b : a;
+            const corridorX = (Math.max(a.x, b.x) + Math.min(a.x + a.width, b.x + b.width)) / 2;
+            const markerX = metrics.originX + corridorX * metrics.cellW;
+            const markerY = metrics.originY + visible.level * metrics.levelH
+                + (SCPGame.undergroundRoomSectionY(state, other) > cut ? metrics.levelH * .83 : metrics.levelH * .17);
+            const open = SCPGame.canTraverseUndergroundGate(state, visible, other);
+            ctx.save();
+            ctx.fillStyle = open ? (gate.kind === 'airlock' ? '#eccf87' : '#9ed6c9') : '#e57372';
+            ctx.strokeStyle = '#172a30';
+            ctx.lineWidth = 1;
+            ctx.fillRect(markerX - 6, markerY - 10, 12, 11);
+            ctx.strokeRect(markerX - 6, markerY - 10, 12, 11);
+            ctx.restore();
+        }
         drawUndergroundStaff(ctx, runtime, metrics);
+        drawUndergroundPlanInset(runtime, width);
         if (runtime.hoveredCell) {
             const hover = runtime.hoveredCell;
             const build = state.buildSelection?.layer === "underground" ? SCPGame.getUndergroundDefinition(state.buildSelection.type) : undefined;
@@ -6011,7 +7612,7 @@ var SCPGame;
             ctx.fillRect(metrics.originX + hover.x * metrics.cellW, metrics.originY + hover.y * metrics.levelH + 4, roomWidth * metrics.cellW, metrics.levelH - 10);
             ctx.strokeRect(metrics.originX + hover.x * metrics.cellW, metrics.originY + hover.y * metrics.levelH + 4, roomWidth * metrics.cellW, metrics.levelH - 10);
         }
-        drawCanvasTitle(ctx, "COMPLEXE SOUTERRAIN", "Excavation verticale, réseaux critiques, cellules uniques et confinement profond", width);
+        drawCanvasTitle(ctx, "RÉSEAU SOUTERRAIN 3 AXES", `Coupe Y=${SCPGame.getSiteSectionSurfaceY(state)} · ${visibleRooms.length} modules ici · jonctions X/Y et puits profondeur`, width);
         const contained = state.scps.filter((scp) => scp.contained).length;
         const maxRisk = Math.max(0, ...state.scps.filter((scp) => scp.contained).map((scp) => scp.breachRisk));
         drawLegend(ctx, width, height, [
@@ -6020,7 +7621,129 @@ var SCPGame;
             ["Risque max", Math.round(maxRisk), maxRisk > 70 ? "#e36e68" : "#d5bd6a"]
         ]);
     }
-    function drawUndergroundRoom(ctx, runtime, room, metrics) {
+    function undergroundMinimapBounds(runtime, width) {
+        if (width < 780)
+            return undefined;
+        return { x: width - 238, y: 66, width: 218, height: 150 };
+    }
+    /** Overview of all transverse cuts at a chosen depth, using the SAME rooms. */
+    function drawUndergroundPlanInset(runtime, width) {
+        const bounds = undergroundMinimapBounds(runtime, width);
+        if (!bounds)
+            return;
+        const state = runtime.state;
+        const ctx = runtime.context;
+        const level = SCPGame.getUndergroundPlanLevel(state);
+        const padding = 8;
+        const startY = bounds.y + 26;
+        const usableW = bounds.width - padding * 2;
+        const usableH = bounds.height - 34;
+        const stepX = usableW / state.undergroundWidth;
+        const stepY = usableH / state.surfaceHeight;
+        ctx.save();
+        ctx.fillStyle = "rgba(6,17,24,.96)";
+        ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+        ctx.strokeStyle = "rgba(138,195,192,.7)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+        ctx.fillStyle = "#d5efe7";
+        ctx.font = "700 11px system-ui";
+        ctx.fillText(`PLAN HORIZONTAL · NIVEAU -${level + 1}`, bounds.x + 9, bounds.y + 17);
+        for (const room of state.undergroundRooms.filter((entry) => entry.level === level)) {
+            const x = bounds.x + padding + room.x * stepX;
+            const y = startY + SCPGame.undergroundRoomSectionY(state, room) * stepY;
+            const w = room.width * stepX;
+            ctx.fillStyle = room.sealed || !room.enabled ? "#985451" : UNDERGROUND_COLORS[room.type];
+            ctx.fillRect(x + .3, y + .3, Math.max(1, w - .6), Math.max(2, stepY - .6));
+            ctx.strokeStyle = state.selectedId === room.id ? "#fff2b5" : "rgba(230,249,240,.34)";
+            ctx.lineWidth = state.selectedId === room.id ? 2 : 0.6;
+            ctx.strokeRect(x + .3, y + .3, Math.max(1, w - .6), Math.max(2, stepY - .6));
+        }
+        // The plan and the lateral section use the exact same gate records.
+        // Amber = airlock, green = door, red = closed or unpowered threshold.
+        for (const gate of state.undergroundGates ?? []) {
+            const a = state.undergroundRooms.find((room) => room.id === gate.roomAId);
+            const b = state.undergroundRooms.find((room) => room.id === gate.roomBId);
+            if (!a || !b || a.level !== level || b.level !== level)
+                continue;
+            const ay = SCPGame.undergroundRoomSectionY(state, a), by = SCPGame.undergroundRoomSectionY(state, b);
+            const pX = ay === by ? (a.x + a.width === b.x ? b.x : a.x)
+                : (Math.max(a.x, b.x) + Math.min(a.x + a.width, b.x + b.width)) / 2;
+            const pY = ay === by ? ay + .5 : (ay + by + 1) / 2;
+            ctx.fillStyle = SCPGame.canTraverseUndergroundGate(state, a, b)
+                ? gate.kind === 'airlock' ? '#eccf87' : '#9ed6c9' : '#e57372';
+            ctx.fillRect(bounds.x + padding + pX * stepX - 2, startY + pY * stepY - 2, 4, 4);
+        }
+        const cut = SCPGame.getSiteSectionSurfaceY(state);
+        ctx.strokeStyle = "#ffdc91";
+        ctx.setLineDash([4, 3]);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(bounds.x + padding, startY + (cut + 0.5) * stepY);
+        ctx.lineTo(bounds.x + padding + usableW, startY + (cut + 0.5) * stepY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+    }
+    function screenToUndergroundMiniMap(runtime, clientX, clientY) {
+        const rect = runtime.canvas.getBoundingClientRect();
+        const bounds = undergroundMinimapBounds(runtime, rect.width);
+        if (!bounds)
+            return undefined;
+        const px = clientX - rect.left;
+        const py = clientY - rect.top;
+        const padding = 8;
+        const fromY = bounds.y + 26;
+        if (px < bounds.x + padding || px >= bounds.x + bounds.width - padding
+            || py < fromY || py >= bounds.y + bounds.height - 8)
+            return undefined;
+        const x = Math.floor((px - bounds.x - padding) * runtime.state.undergroundWidth / (bounds.width - 2 * padding));
+        const sectionY = Math.floor((py - fromY) * runtime.state.surfaceHeight / (bounds.height - 34));
+        return { x, sectionY };
+    }
+    function drawUndergroundSurfaceStrip(ctx, runtime, metrics) {
+        const state = runtime.state;
+        const sectionY = SCPGame.getSiteSectionSurfaceY(state);
+        const roofTop = metrics.originY - 14;
+        ctx.save();
+        for (const room of state.surfaceRooms) {
+            if (!SCPGame.isSurfaceRoomOnUndergroundSection(state, room))
+                continue;
+            const left = SCPGame.surfaceXToUndergroundX(state, room.x);
+            const right = SCPGame.surfaceXToUndergroundX(state, room.x + room.width);
+            const visibleLeft = Math.max(0, left);
+            const visibleRight = Math.min(state.undergroundWidth, right);
+            if (visibleRight <= visibleLeft)
+                continue;
+            const x = metrics.originX + visibleLeft * metrics.cellW;
+            const w = (visibleRight - visibleLeft) * metrics.cellW;
+            const active = state.selectedType === "underground-room" && state.undergroundRooms.some((u) => u.id === state.selectedId && SCPGame.getSurfaceRoomAboveUnderground(state, u)?.id === room.id);
+            ctx.fillStyle = active ? "#ffe4a5" : SURFACE_COLORS[room.type];
+            ctx.fillRect(x + 1, roofTop, Math.max(1, w - 2), 10);
+            ctx.strokeStyle = "rgba(255,255,255,.5)";
+            ctx.strokeRect(x + 1, roofTop, Math.max(1, w - 2), 10);
+        }
+        for (const portal of SCPGame.getUndergroundPortals(state).filter((entry) => SCPGame.undergroundRoomSectionY(state, entry.shaft) === sectionY)) {
+            const x = metrics.originX + (portal.shaft.x + portal.shaft.width / 2) * metrics.cellW;
+            ctx.strokeStyle = "#b3f1dd";
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([2, 2]);
+            ctx.beginPath();
+            ctx.moveTo(x, roofTop);
+            ctx.lineTo(x, metrics.originY + 8);
+            ctx.stroke();
+        }
+        ctx.setLineDash([]);
+        ctx.fillStyle = "rgba(237,236,216,.82)";
+        ctx.font = "9px system-ui";
+        ctx.textAlign = "left";
+        if (metrics.originX > 80)
+            ctx.fillText("BÂTIMENT", metrics.originX - 67, roofTop + 8);
+        ctx.restore();
+        // La bande reste une section précise, tandis que les nouvelles galeries
+        // possèdent maintenant une coordonnée transversale et une profondeur réelle.
+    }
+    function drawUndergroundRoom(ctx, runtime, room, metrics, utilityMap) {
         const state = runtime.state;
         const definition = SCPGame.getUndergroundDefinition(room.type);
         const selected = state.selectedType === "underground-room" && state.selectedId === room.id;
@@ -6037,6 +7760,16 @@ var SCPGame;
         ctx.strokeStyle = selected ? "#79d9b8" : room.sealed ? "#e3b960" : room.condition < 45 ? "#dc6d65" : "rgba(235,241,241,.25)";
         ctx.lineWidth = selected ? 2 : 1;
         ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+        const utilities = utilityMap.get(room.id) ?? { power: false, water: false, air: false };
+        // Three bars fit inside even a one-cell lift shaft.
+        const barStride = Math.max(4, Math.min(11, (w - 10) / 3));
+        for (const [index, ok, color] of [
+            [0, utilities.power, "#edd67d"], [1, utilities.water, "#83baf5"],
+            [2, utilities.air, "#93e4b5"]
+        ]) {
+            ctx.fillStyle = ok ? color : "#874c51";
+            ctx.fillRect(x + 5 + index * barStride, y + h - 16, Math.max(2, barStride - 2), 3);
+        }
         if (room.type === "elevator-shaft") {
             ctx.strokeStyle = "rgba(225,235,237,.45)";
             ctx.beginPath();
@@ -6074,7 +7807,9 @@ var SCPGame;
             drawWarningBadge(ctx, x + 8, y + 9, "!");
     }
     function drawUndergroundStaff(ctx, runtime, metrics) {
-        runtime.state.staff.filter((member) => member.status !== "dead" && member.position.layer === "underground").forEach((member, index) => {
+        runtime.state.staff.filter((member) => member.status !== "dead" && member.position.layer === "underground"
+            && Math.abs(SCPGame.getStaffUndergroundSectionY(runtime.state, member) - SCPGame.getSiteSectionSurfaceY(runtime.state)) < 0.55)
+            .forEach((member, index) => {
             const level = member.position.level ?? Math.round(member.position.y);
             const x = metrics.originX + (member.position.x + (index % 3) * 0.12) * metrics.cellW;
             const y = metrics.originY + level * metrics.levelH + metrics.levelH * 0.72;
@@ -6214,13 +7949,36 @@ var SCPGame;
     function selectAtCanvas(runtime, clientX, clientY) {
         const state = runtime.state;
         if (state.view === "region") {
-            selectAtGridCell(runtime, screenToRegionCell(runtime, clientX, clientY));
+            const rect = runtime.canvas.getBoundingClientRect();
+            const metrics = regionMetrics(runtime, rect.width);
+            const dx = (clientX - rect.left - metrics.originX) / (metrics.tileW * 0.5);
+            const dy = (clientY - rect.top - metrics.originY) / (metrics.tileH * 0.5);
+            const linked = SCPGame.getSurfaceRoomAtRegionPosition(state, { x: (dx + dy) / 2, y: (dy - dx) / 2 });
+            if (linked) {
+                state.selectedId = linked.id;
+                state.selectedType = "surface-room";
+            }
+            else {
+                selectAtGridCell(runtime, screenToRegionCell(runtime, clientX, clientY));
+            }
         }
         else if (state.view === "surface") {
             selectAtGridCell(runtime, screenToSurfaceCell(runtime, clientX, clientY));
         }
         else if (state.view === "underground") {
-            selectAtGridCell(runtime, screenToUndergroundCell(runtime, clientX, clientY));
+            const minimap = screenToUndergroundMiniMap(runtime, clientX, clientY);
+            if (minimap) {
+                SCPGame.setUndergroundSlice(state, minimap.sectionY);
+                const level = SCPGame.getUndergroundPlanLevel(state);
+                const room = [...state.undergroundRooms].reverse().find((entry) => entry.level === level
+                    && SCPGame.undergroundRoomSectionY(state, entry) === minimap.sectionY
+                    && minimap.x >= entry.x && minimap.x < entry.x + entry.width);
+                state.selectedId = room?.id;
+                state.selectedType = room ? "underground-room" : undefined;
+            }
+            else {
+                selectAtGridCell(runtime, screenToUndergroundCell(runtime, clientX, clientY));
+            }
         }
         else if (state.view === "command") {
             const zone = screenToCommandZone(runtime, clientX, clientY);
@@ -6232,11 +7990,20 @@ var SCPGame;
     function selectAtGridCell(runtime, cell) {
         const state = runtime.state;
         if (state.view === "region") {
-            const facility = [...state.regionFacilities].reverse().find((entry) => SCPGame.pointInRect(cell, entry.x, entry.y, entry.width, entry.height));
-            state.selectedId = facility?.id;
-            state.selectedType = facility ? "facility" : undefined;
+            const linked = SCPGame.getSurfaceRoomAtRegionPosition(state, { x: cell.x + 0.5, y: cell.y + 0.5 });
+            const facility = !linked ? [...state.regionFacilities].reverse().find((entry) => SCPGame.pointInRect(cell, entry.x, entry.y, entry.width, entry.height)) : undefined;
+            state.selectedId = linked?.id ?? facility?.id;
+            state.selectedType = linked ? "surface-room" : facility ? "facility" : undefined;
         }
         else if (state.view === "surface") {
+            const annex = SCPGame.getActiveInteriorFacility(state);
+            if (annex) {
+                const zone = SCPGame.getAnnexInteriorPlan(state, annex)?.rooms.find((entry) => SCPGame.pointInRect(cell, entry.x, entry.y, entry.width, entry.height));
+                state.flags["annex-room-selected"] = zone?.id ?? "";
+                state.selectedId = annex.id;
+                state.selectedType = "facility";
+                return;
+            }
             const room = [...state.surfaceRooms].reverse().find((entry) => SCPGame.pointInRect(cell, entry.x, entry.y, entry.width, entry.height));
             if (room) {
                 state.selectedId = room.id;
@@ -6249,7 +8016,8 @@ var SCPGame;
             }
         }
         else if (state.view === "underground") {
-            const room = [...state.undergroundRooms].reverse().find((entry) => entry.level === cell.y && cell.x >= entry.x && cell.x < entry.x + entry.width);
+            const room = [...state.undergroundRooms].reverse().find((entry) => entry.level === cell.y && SCPGame.undergroundRoomSectionY(state, entry) === SCPGame.getSiteSectionSurfaceY(state)
+                && cell.x >= entry.x && cell.x < entry.x + entry.width);
             state.selectedId = room?.id;
             state.selectedType = room ? "underground-room" : undefined;
         }
@@ -6544,6 +8312,25 @@ var SCPGame;
         return labels[view];
     }
     function renderRegionPanel(state) {
+        const linkedRoom = state.selectedType === "surface-room"
+            ? state.surfaceRooms.find((room) => room.id === state.selectedId) : undefined;
+        if (linkedRoom) {
+            const definition = SCPGame.getSurfaceDefinition(linkedRoom.type);
+            const roof = SCPGame.getSurfaceRegionFootprint(state, linkedRoom);
+            return `
+        ${renderSelectionHeader(definition.icon, definition.name, "Toiture du bâtiment principal")}
+        <p class="muted">C'est la même salle que dans le plan intérieur. Chaque modification de la Surface actualise ce volume extérieur.</p>
+        ${renderMetricGrid([
+                ["Repère extérieur X", roof.x.toFixed(2)],
+                ["Repère extérieur Y", roof.y.toFixed(2)],
+                ["Emprise", `${linkedRoom.width} × ${linkedRoom.height} cases`],
+                ["État", percent(linkedRoom.condition)]
+            ])}
+        <button class="wide-button" data-view="surface">Entrer dans ce bâtiment</button>
+        ${SCPGame.isSurfaceRoomOnUndergroundSection(state, linkedRoom) ? `<button class="wide-button" data-view="underground">Voir sa coupe souterraine</button>` : ""}
+        <hr>${renderBuildCatalog(state, "region")}
+      `;
+        }
         const selected = state.selectedType === "facility" ? state.regionFacilities.find((entry) => entry.id === state.selectedId) : undefined;
         if (selected) {
             const definition = SCPGame.getRegionDefinition(selected.type);
@@ -6556,6 +8343,10 @@ var SCPGame;
                 ["Couverture", signed(definition.coverImpact ?? 0)],
                 ["Suspicion", signed(definition.suspicionImpact ?? 0)]
             ])}
+        ${SCPGame.isRegionFacilityEnterable(selected)
+                ? `<button class="wide-button" data-action="enter-annex">Explorer l'intérieur de cette annexe</button>
+             <p class="hint">Plan intérieur propre à ce bâtiment, lié à son état réel. Les zones sont consultatives et ne génèrent pas de personnel fictif.</p>`
+                : `<p class="hint">Installation extérieure sans pièces closes : vue régionale uniquement.</p>`}
         ${renderSelectionActions()}
         <hr>
         ${renderBuildCatalog(state, "region")}
@@ -6563,11 +8354,43 @@ var SCPGame;
         }
         return `
       ${renderReputationOverview(state)}
-      <p class="hint">Sélectionnez une installation pour consulter son état, ou choisissez une construction puis cliquez sur la carte.</p>
+      <section class="summary-card"><h3>Site principal — vue extérieure</h3>
+        <p>Les toitures visibles au sud-est sont générées depuis les ${state.surfaceRooms.filter((room) => room.type !== "corridor").length} salles réellement construites dans le même complexe.</p>
+        <button class="wide-button" data-view="surface">Entrer dans le bâtiment principal</button>
+        <p class="hint">Les autres installations régionales sont des annexes extérieures. La zone du bâtiment principal est réservée.</p>
+        ${SCPGame.getRegionCampusOverlap(state).length ? `<p class="staff-route-status">Ancienne sauvegarde : ${SCPGame.getRegionCampusOverlap(state).length} annexe(s) chevauchent l'emprise. Rien n'a été déplacé ni effacé.</p>` : ""}
+      </section>
+      <p class="hint">Sélectionnez une toiture du Site ou une annexe régionale sur la carte.</p>
       ${renderBuildCatalog(state, "region")}
     `;
     }
     function renderSurfacePanel(state) {
+        const annex = SCPGame.getActiveInteriorFacility(state);
+        if (annex) {
+            const plan = SCPGame.getAnnexInteriorPlan(state, annex);
+            const selectedZone = plan.rooms.find((zone) => zone.id === state.flags["annex-room-selected"]);
+            const definition = SCPGame.getRegionDefinition(annex.type);
+            return `
+        ${renderSelectionHeader(definition.icon, plan.buildingName, `Annexe régionale · niveau ${annex.level}`)}
+        <p class="muted">Plan intérieur de l'installation extérieure sélectionnée. Les quatre zones sont propres à ce bâtiment et reflètent sa fonction.</p>
+        ${renderMetricGrid([
+                ["État réel", percent(annex.condition)],
+                ["Niveau", String(annex.level)],
+                ["Emprise ville", `${annex.width} × ${annex.height}`],
+                ["Statut", annex.enabled ? "En service" : "Arrêté"]
+            ])}
+        ${selectedZone ? `<section class="summary-card"><h3>${escapeHtml(selectedZone.name)}</h3>
+          <p>${escapeHtml(selectedZone.function)}</p>
+          <p class="hint">Zone d'inspection rattachée à ${escapeHtml(plan.buildingName)}. La production et la sécurité restent gouvernées par l'installation extérieure existante.</p>
+        </section>` : ""}
+        <section class="summary-card"><h3>Pièces de l'annexe</h3>
+          <div class="surface-access-list">${plan.rooms.map((zone) => `<button class="wide-button" data-action="select-annex-zone" data-room="${escapeHtml(zone.id)}" aria-pressed="${selectedZone?.id === zone.id}">${escapeHtml(zone.name)}</button>`).join("")}</div>
+        </section>
+        <button class="wide-button" data-view="region">Revenir au bâtiment dans la ville</button>
+        <button class="wide-button" data-action="open-main-interior">Revenir à l'intérieur du Site principal</button>
+        <p class="hint">Les zones de l'annexe sont inspectables ; leur construction individualisée et le déplacement des agents entre bâtiments seront développés séparément. Aucun service fictif n'est ajouté.</p>
+      `;
+        }
         if (state.selectedType === "staff") {
             const member = state.staff.find((entry) => entry.id === state.selectedId);
             if (member)
@@ -6591,6 +8414,10 @@ var SCPGame;
                 ["Personnel", String(selected.staffAssigned.length)]
             ])}
         ${renderAssignedStaff(state, selected.staffAssigned)}
+        <p class="hint">Cette salle possède la même emprise dans la vue Région, à une autre échelle.</p>
+        <button class="wide-button" data-view="region">Voir ce bâtiment dans la ville</button>
+        <button class="wide-button" data-view="underground">Voir la coupe sous cette salle</button>
+        <p class="hint">La coupe s'adaptera à l'axe de cette salle. Seuls les modules souterrains réellement construits y apparaîtront.</p>
         ${renderSelectionActions()}
         ${renderSurfaceAccessPanel(state, selected)}
         <hr>
@@ -6608,6 +8435,11 @@ var SCPGame;
             ["Moral", percent(state.reputation.personnel)],
             ["Blessés", String(state.staff.filter((member) => member.status === "injured").length)]
         ])}
+      </section>
+      <section class="summary-card"><h3>Intérieur du bâtiment principal</h3>
+        <p>Plan au sol des salles représentées en toiture dans la Région. La ligne jaune affiche la coupe souterraine Y=${SCPGame.getSiteSectionSurfaceY(state)}, sélectionnable parmi ${state.surfaceHeight} axes.</p>
+        <button class="wide-button" data-view="region">Voir les toitures depuis la ville</button>
+        <button class="wide-button" data-view="underground">Explorer les coupes souterraines</button>
       </section>
       <p class="hint">Les salles fonctionnent comme dans un jeu de gestion hospitalière : capacité, personnel, file, maintenance et trajets influencent directement le Site.</p>
       ${renderBuildCatalog(state, "surface")}
@@ -6791,29 +8623,126 @@ var SCPGame;
         activeRuntime.uiDirty = true;
         refreshUI(activeRuntime, true);
     }
+    function renderUndergroundSliceControls(state) {
+        const y = SCPGame.getSiteSectionSurfaceY(state);
+        const visible = state.undergroundRooms.filter((room) => SCPGame.undergroundRoomSectionY(state, room) === y).length;
+        const other = state.undergroundRooms.length - visible;
+        return `<section class="summary-card" aria-label="Navigation des coupes souterraines">
+      <div class="catalog-heading"><h3>Coupe souterraine Y=${y}</h3><span>${y + 1} / ${state.surfaceHeight}</span></div>
+      <div class="action-row"><button data-action="underground-slice-prev" ${y <= 0 ? "disabled" : ""}>Coupe précédente</button>
+      <button data-action="underground-slice-next" ${y >= state.surfaceHeight - 1 ? "disabled" : ""}>Coupe suivante</button></div>
+      <label class="hint" for="underground-slice-jump">Accès direct à une coupe</label>
+      <select id="underground-slice-jump" class="underground-slice-jump" data-slice-select aria-label="Choisir la coupe souterraine">
+        ${Array.from({ length: state.surfaceHeight }, (_, row) => `<option value="${row}" ${row === y ? "selected" : ""}>Y=${row} · ${state.undergroundRooms.filter((room) => SCPGame.undergroundRoomSectionY(state, room) === row).length} module(s)</option>`).join("")}
+      </select>
+      <div class="catalog-heading"><h3>Plan horizontal</h3><span>Niveau -${SCPGame.getUndergroundPlanLevel(state) + 1}</span></div>
+      <div class="action-row"><button data-action="underground-level-prev" ${SCPGame.getUndergroundPlanLevel(state) <= 0 ? "disabled" : ""}>Niveau au-dessus</button>
+      <button data-action="underground-level-next" ${SCPGame.getUndergroundPlanLevel(state) >= state.undergroundLevels - 1 ? "disabled" : ""}>Niveau inférieur</button></div>
+      <p class="hint">${visible} module(s) ici · ${other} sur d'autres coupes. Les flèches indiquent les traverses physiques entre coupes voisines. Cliquez sur la mini-carte (ordinateur) pour choisir directement une coupe et un module du niveau affiché.</p>
+    </section>`;
+    }
+    function renderUndergroundGatePanel(state, selected) {
+        const neighbours = state.undergroundRooms.filter((room) => room.id !== selected.id
+            && room.level === selected.level && SCPGame.undergroundRoomsTouch(state, selected, room))
+            .sort((a, b) => SCPGame.undergroundRoomSectionY(state, a) - SCPGame.undergroundRoomSectionY(state, b) || a.x - b.x);
+        const existing = (state.undergroundGates ?? []).filter((gate) => gate.roomAId === selected.id || gate.roomBId === selected.id);
+        if (!neighbours.length && !existing.length)
+            return `<section class="summary-card"><h3>Portes et sas souterrains</h3><p class="hint">Aucune cloison voisine : construisez une galerie contiguë sur l'axe X ou Y.</p></section>`;
+        const entries = neighbours.map((room) => {
+            const gate = SCPGame.getUndergroundGateBetween(state, selected, room);
+            const label = escapeHtml(SCPGame.getUndergroundDefinition(room.type).name);
+            const position = `X=${room.x}, Y=${SCPGame.undergroundRoomSectionY(state, room)}, -${room.level + 1}`;
+            const direction = gate ? gate.direction === 'both' ? 'Double sens'
+                : gate.direction === 'a-to-b' ? `Sens : ${escapeHtml(SCPGame.getUndergroundDefinition(state.undergroundRooms.find((r) => r.id === gate.roomAId).type).name)} → B`
+                    : `Sens : B → A` : '';
+            if (!gate)
+                return `<div class="underground-gate-row"><strong>${label}</strong><small>${position} · passage ouvert (ancien réseau)</small>
+        <div class="action-row"><button data-action="add-underground-door" data-room="${escapeHtml(selected.id)}" data-other="${escapeHtml(room.id)}">Installer porte (650)</button>
+        <button data-action="add-underground-airlock" data-room="${escapeHtml(selected.id)}" data-other="${escapeHtml(room.id)}">Installer sas (2 600)</button></div></div>`;
+            const locked = !gate.enabled || !SCPGame.canTraverseUndergroundGate(state, selected, room);
+            const passengers = gate.queue.map((id) => state.staff.find((m) => m.id === id)?.name || id).join(', ');
+            const occupant = gate.cycle ? state.staff.find((m) => m.id === gate.cycle?.staffId)?.name || gate.cycle.staffId : '';
+            return `<div class="underground-gate-row"><strong>${gate.kind === 'airlock' ? 'Sas' : 'Porte'} — ${label}</strong>
+        <small>${position} · ${direction} · habilitation ${gate.minClearance} · franchissements ${gate.passedCount}</small>
+        <p class="hint" role="status">${locked ? 'Accès restreint · ' : ''}${escapeHtml(SCPGame.getUndergroundGateStatus(state, gate))}${occupant ? ` · occupant : ${escapeHtml(occupant)}` : ''}${passengers ? ` · file : ${escapeHtml(passengers)}` : ''}</p>
+        <div class="action-row"><button data-action="underground-gate-lock" data-gate="${escapeHtml(gate.id)}">${gate.enabled ? 'Verrouiller' : 'Déverrouiller'}</button>
+        <button data-action="underground-gate-clearance" data-gate="${escapeHtml(gate.id)}" data-delta="-1" ${gate.minClearance <= 0 ? 'disabled' : ''}>Habilitation −</button>
+        <button data-action="underground-gate-clearance" data-gate="${escapeHtml(gate.id)}" data-delta="1" ${gate.minClearance >= 5 ? 'disabled' : ''}>Habilitation +</button></div>
+        <div class="action-row"><button data-action="underground-gate-direction" data-gate="${escapeHtml(gate.id)}">Sens : ${gate.direction === 'both' ? '↔' : gate.direction === 'a-to-b' ? 'A → B' : 'B → A'}</button>
+        ${gate.kind === 'airlock' ? `<button data-action="underground-gate-power" data-gate="${escapeHtml(gate.id)}">Énergie ${gate.powered ? 'ON' : 'OFF'}</button>
+        <button data-action="underground-gate-air" data-gate="${escapeHtml(gate.id)}">Air ${gate.airSupply ? 'OK' : 'NOK'}</button>
+        <button data-action="underground-gate-evacuate" data-gate="${escapeHtml(gate.id)}">Évacuer</button>` : ''}
+        <button data-action="underground-gate-remove" data-gate="${escapeHtml(gate.id)}">Démonter</button></div>
+      </div>`;
+        }).join('');
+        return `<section class="summary-card underground-gates"><h3>Portes et sas souterrains</h3>
+      <p class="hint">Accès installés sur les vraies liaisons X/Y. Sens A↔B selon le côté où le sas a été posé. Un sas ne laisse passer qu'un agent à la fois (file FIFO, égalisation et pannes).</p>${entries}</section>`;
+    }
+    function renderUndergroundUtilityPanel(state, selected) {
+        const connected = state.undergroundRooms.filter((room) => room.id !== selected.id
+            && SCPGame.undergroundRoomsTouch(state, selected, room));
+        const status = SCPGame.getUndergroundUtilityStatus(state, selected);
+        const tags = (name, ok) => `<span class="utility-indicator ${ok ? "utility-online" : "utility-offline"}">${name} : ${ok ? "Raccordé" : "Hors service"}</span>`;
+        const entries = connected.map((other) => {
+            const line = SCPGame.getUndergroundConduitBetween(state, selected, other);
+            const name = escapeHtml(SCPGame.getUndergroundDefinition(other.type).name);
+            const attrs = `data-room="${escapeHtml(selected.id)}" data-other="${escapeHtml(other.id)}"`;
+            if (!line)
+                return `<div class="utility-circuit-row"><strong>${name}</strong>
+        <p class="hint">Réseau absent · X=${other.x}, Y=${SCPGame.undergroundRoomSectionY(state, other)}, profondeur ${other.level + 1}</p>
+        <button data-action="underground-conduit-install" ${attrs}>Poser une gaine (850 crédits · 4 pièces)</button></div>`;
+            const indicators = ["power", "water", "air"]
+                .map((kind) => `<button data-action="underground-conduit-toggle" ${attrs} data-kind="${kind}" aria-pressed="${line[kind]}">${kind === "power" ? "Électricité" : kind === "water" ? "Eau" : "Air"} : ${line[kind] ? "Ouvert" : "Isolé"}</button>`).join("");
+            return `<div class="utility-circuit-row"><strong>${name}</strong><div class="action-row">${indicators}</div>
+        <button data-action="underground-conduit-remove" ${attrs}>Démonter la gaine</button></div>`;
+        }).join("");
+        return `<section class="summary-card underground-utilities" aria-label="Réseaux techniques du sous-sol">
+      <h3>Réseaux techniques physiques</h3>
+      <div class="utility-status">${tags("Électricité", status.power)}${tags("Eau", status.water)}${tags("Ventilation", status.air)}</div>
+      <p class="hint">Câbles, conduites et gaines entre modules adjacents. Les nouveaux modules exigent un raccordement. Les anciennes galeries conservent leurs liaisons historiques. Les vannes sont indépendantes des portes de personnel.</p>
+      ${entries || '<p class="hint">Aucune paroi technique voisine.</p>'}
+    </section>`;
+    }
     function renderUndergroundPanel(state) {
         const selected = state.selectedType === "underground-room" ? state.undergroundRooms.find((entry) => entry.id === state.selectedId) : undefined;
         if (selected) {
             const definition = SCPGame.getUndergroundDefinition(selected.type);
             const scp = selected.scpId ? state.scps.find((entry) => entry.id === selected.scpId) : undefined;
+            const supplies = SCPGame.getUndergroundUtilityStatus(state, selected);
             return `
-        ${renderSelectionHeader(definition.icon, definition.name, `Niveau -${selected.level + 1}`)}
+        ${renderUndergroundSliceControls(state)}
+        ${renderSelectionHeader(definition.icon, definition.name, `Niveau -${selected.level + 1} · coupe ${SCPGame.undergroundRoomSectionY(state, selected)}`)}
         <p class="muted">${escapeHtml(definition.description)}</p>
         ${renderMetricGrid([
                 ["État", percent(selected.condition)],
                 ["Confinement", String(SCPGame.getEffectiveRoomContainment(selected))],
                 ["Sécurité", String(SCPGame.getEffectiveRoomSecurity(selected))],
-                ["Équipe", String(selected.staffAssigned.length)]
+                ["Équipe", String(selected.staffAssigned.length)],
+                ["Habilitation", `Niveau ${SCPGame.getUndergroundClearanceRequirement(selected)}`],
+                ["Ascenseur", SCPGame.hasUndergroundElevatorConnection(state, selected) ? "Relié" : "Non relié"],
+                ["Galerie", selected.sealed ? "Scellée" : "Ouverte"],
+                ["Électricité", supplies.power ? "Alimentée" : "Non raccordée"],
+                ["Eau", supplies.water ? "Distribuée" : "Coupée"],
+                ["Air", supplies.air ? "Ventilé" : "Isolé"],
+                ["À l'aplomb", SCPGame.getSurfaceRoomAboveUnderground(state, selected)
+                        ? SCPGame.getSurfaceDefinition(SCPGame.getSurfaceRoomAboveUnderground(state, selected).type).name : "Terrain sans pièce"],
+                ["Coupe", `Y=${SCPGame.undergroundRoomSectionY(state, selected)} / ${state.surfaceHeight - 1}`]
             ])}
         ${scp ? renderContainedScpCard(state, scp) : renderCompatibleTransfers(state, selected)}
         ${renderSelectionActions()}
+        <button class="wide-button" data-view="surface">Voir la salle ou le terrain au-dessus</button>
+        <button class="wide-button" data-view="region">Voir la position dans la ville</button>
+        <button class="wide-button" data-action="toggle-underground-seal" data-room="${escapeHtml(selected.id)}">${selected.sealed ? "Rouvrir le secteur" : "Sceller le secteur"}</button>
+        ${renderUndergroundGatePanel(state, selected)}
+        ${renderUndergroundUtilityPanel(state, selected)}
         <hr>
         ${renderBuildCatalog(state, "underground")}
       `;
         }
         return `
+      ${renderUndergroundSliceControls(state)}
       <section class="summary-card">
-        <h3>Confinement profond</h3>
+        <h3>Réseau souterrain à trois coordonnées</h3>
         ${renderMetricGrid([
             ["SCP confinés", String(state.scps.filter((scp) => scp.contained).length)],
             ["Cellules libres", String(state.undergroundRooms.filter((room) => !room.scpId && SCPGame.getUndergroundDefinition(room.type).containment >= 4).length)],
@@ -6821,6 +8750,8 @@ var SCPGame;
             ["Risque max", percent(Math.max(0, ...state.scps.filter((scp) => scp.contained).map((scp) => scp.breachRisk)))]
         ])}
       </section>
+      <p class="hint">Les modules sont placés sur l'axe (X, Y, profondeur). La bande supérieure reflète les vrais locaux au-dessus de la coupe Y sélectionnée. Les nouvelles galeries peuvent joindre d'autres coupes avec des traverses visibles ; seules les cages alignées avec les ascenseurs permettent la remontée.</p>
+      <button class="wide-button" data-view="surface">Voir le plan intérieur au-dessus</button>
       ${renderUncontainedScps(state)}
       ${renderBuildCatalog(state, "underground")}
     `;
@@ -7376,6 +9307,98 @@ var SCPGame;
             case "remove-access":
                 result = SCPGame.removeSurfaceAccess(state, String(target.dataset.room), String(target.dataset.access));
                 break;
+            case "underground-level-prev":
+                result = SCPGame.setUndergroundPlanLevel(state, SCPGame.getUndergroundPlanLevel(state) - 1);
+                break;
+            case "underground-level-next":
+                result = SCPGame.setUndergroundPlanLevel(state, SCPGame.getUndergroundPlanLevel(state) + 1);
+                break;
+            case "underground-slice-prev":
+                result = SCPGame.setUndergroundSlice(state, SCPGame.getSiteSectionSurfaceY(state) - 1);
+                break;
+            case "underground-slice-next":
+                result = SCPGame.setUndergroundSlice(state, SCPGame.getSiteSectionSurfaceY(state) + 1);
+                break;
+            case "enter-annex":
+                result = SCPGame.openAnnexInterior(state, String(state.selectedId));
+                break;
+            case "open-main-interior": {
+                state.activeInteriorFacilityId = undefined;
+                state.flags["annex-room-selected"] = "";
+                state.selectedId = undefined;
+                state.selectedType = undefined;
+                state.buildSelection = undefined;
+                state.view = "surface";
+                break;
+            }
+            case "select-annex-zone": {
+                const annex = SCPGame.getActiveInteriorFacility(state);
+                const zone = annex && SCPGame.getAnnexInteriorPlan(state, annex)?.rooms.find((entry) => entry.id === target.dataset.room);
+                if (zone)
+                    state.flags["annex-room-selected"] = zone.id;
+                else
+                    result = { ok: false, message: "Zone de l'annexe introuvable." };
+                break;
+            }
+            case "add-underground-door":
+                result = SCPGame.installUndergroundGate(state, String(target.dataset.room), String(target.dataset.other), 'door');
+                break;
+            case "add-underground-airlock":
+                result = SCPGame.installUndergroundGate(state, String(target.dataset.room), String(target.dataset.other), 'airlock');
+                break;
+            case "underground-conduit-install":
+                result = SCPGame.installUndergroundConduit(state, String(target.dataset.room), String(target.dataset.other));
+                break;
+            case "underground-conduit-toggle":
+                result = SCPGame.toggleUndergroundConduit(state, String(target.dataset.room), String(target.dataset.other), target.dataset.kind);
+                break;
+            case "underground-conduit-remove":
+                result = SCPGame.removeUndergroundConduit(state, String(target.dataset.room), String(target.dataset.other));
+                break;
+            case "underground-gate-lock": {
+                const gate = (state.undergroundGates ?? []).find((item) => item.id === target.dataset.gate);
+                result = gate ? SCPGame.configureUndergroundGate(state, gate.id, { enabled: !gate.enabled })
+                    : { ok: false, message: 'Accès introuvable.' };
+                break;
+            }
+            case "underground-gate-clearance": {
+                const gate = (state.undergroundGates ?? []).find((item) => item.id === target.dataset.gate);
+                const value = gate ? gate.minClearance + Number(target.dataset.delta) : -1;
+                result = gate ? SCPGame.configureUndergroundGate(state, gate.id, { minClearance: value })
+                    : { ok: false, message: 'Accès introuvable.' };
+                break;
+            }
+            case "underground-gate-direction": {
+                const gate = (state.undergroundGates ?? []).find((item) => item.id === target.dataset.gate);
+                const direction = gate?.direction === 'both' ? 'a-to-b' : gate?.direction === 'a-to-b' ? 'b-to-a' : 'both';
+                result = gate ? SCPGame.configureUndergroundGate(state, gate.id, { direction })
+                    : { ok: false, message: 'Accès introuvable.' };
+                break;
+            }
+            case "underground-gate-power": {
+                const gate = (state.undergroundGates ?? []).find((item) => item.id === target.dataset.gate);
+                result = gate ? SCPGame.configureUndergroundGate(state, gate.id, { powered: !gate.powered })
+                    : { ok: false, message: 'Accès introuvable.' };
+                break;
+            }
+            case "underground-gate-air": {
+                const gate = (state.undergroundGates ?? []).find((item) => item.id === target.dataset.gate);
+                result = gate ? SCPGame.configureUndergroundGate(state, gate.id, { airSupply: !gate.airSupply })
+                    : { ok: false, message: 'Accès introuvable.' };
+                break;
+            }
+            case "underground-gate-remove":
+                result = SCPGame.removeUndergroundGate(state, String(target.dataset.gate));
+                break;
+            case "underground-gate-evacuate":
+                result = SCPGame.evacuateUndergroundGate(state, String(target.dataset.gate));
+                break;
+            case "toggle-underground-seal": {
+                const room = state.undergroundRooms.find((entry) => entry.id === target.dataset.room);
+                result = room ? SCPGame.setUndergroundSeal(state, room.id, !room.sealed)
+                    : { ok: false, message: "Module souterrain introuvable." };
+                break;
+            }
             case "evacuate-access":
                 result = SCPGame.evacuateSurfaceAccessAction(state, String(target.dataset.room), String(target.dataset.access));
                 break;
@@ -7500,6 +9523,14 @@ var SCPGame;
                     offset.value = String(SCPGame.clamp(Number(offset.value) || 1, 1, input.value === "north" || input.value === "south" ? room.width : room.height));
             }
             updateSurfaceAccessForm(activeRuntime.state);
+            return;
+        }
+        if (input.dataset.sliceSelect !== undefined) {
+            const result = SCPGame.setUndergroundSlice(activeRuntime.state, Number(input.value));
+            if (!result.ok)
+                showToast(result.message, "error");
+            activeRuntime.uiDirty = true;
+            refreshUI(activeRuntime, true);
             return;
         }
         if (!input.dataset.setting)
@@ -7930,10 +9961,12 @@ var SCPGame;
     }
     function handleCanvasActivation(runtime, clientX, clientY) {
         const cell = hoverCellForView(runtime, clientX, clientY);
-        if (cell) {
+        if (cell && runtime.state.buildSelection) {
             handleGridCellActivation(runtime, cell);
             return;
         }
+        // A roof occupies a fractional isometric region tile. Using only the
+        // floored grid coordinate selects the wrong interior room.
         SCPGame.selectAtCanvas(runtime, clientX, clientY);
     }
     function handleGridCellActivation(runtime, cell) {
@@ -7944,7 +9977,9 @@ var SCPGame;
             result = SCPGame.buildRegionFacility(state, build.type, cell.x, cell.y);
         }
         else if (build && build.layer === "surface" && state.view === "surface") {
-            result = SCPGame.buildSurfaceRoom(state, build.type, cell.x, cell.y);
+            result = SCPGame.getActiveInteriorFacility(state)
+                ? { ok: false, message: "Cette annexe dispose d'un plan d'inspection. Retournez au Site principal pour construire." }
+                : SCPGame.buildSurfaceRoom(state, build.type, cell.x, cell.y);
         }
         else if (build && build.layer === "underground" && state.view === "underground") {
             result = SCPGame.buildUndergroundRoom(state, build.type, cell.x, cell.y);

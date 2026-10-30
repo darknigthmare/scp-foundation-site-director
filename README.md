@@ -88,6 +88,20 @@ Les accès modifient le **graphe de déplacement** des employés, pas seulement 
 
 **Validation :** [132 tests métier et 21 étapes Chromium réussis dans la CI](https://github.com/darknigthmare/scp-foundation-site-director/actions/runs/41060363210), aucun message navigateur. Le code contrôle des seuils X/Y mais reste dessiné en **2.5D** ; ce n'est ni une reconstruction 1:1 canonique d'un site SCP ni un moteur WebGL 3D achevé. Voir le [rapport QA](docs/qa/2026-10-30/UNDERGROUND_GATES_AND_AIRLOCKS.md).
 
+## Réseaux techniques souterrains physiques — tranche Operations (30 octobre 2026)
+
+Le sous-sol distingue maintenant trois services **indépendants** : alimentation électrique, distribution d'eau et ventilation. Les câbles, conduites et gaines suivent les **vraies jonctions des modules (X–Y–profondeur)**, séparément des portes/sas de circulation. Sélectionnez un module pour consulter les trois états et, sur chaque paroi contiguë, **poser une gaine technique** (850 crédits et 4 pièces), isoler/rétablir les trois circuits ou démonter l'installation avec remboursement partiel plafonné aux sommes réellement payées.
+
+Une **nouvelle pièce n'est pas automatiquement alimentée** : elle doit rejoindre la distribution par une liaison technique. Les anciens Sites possèdent, après migration, les raccordements correspondant à leurs volumes déjà construits, sans facturation ni déplacement du personnel. Les coupures n'inventent pas de connexion à travers la roche. Les sections peuvent recevoir des circuits de secours par un autre chemin X/Y ; une coupure de porte pour le personnel ne retire pas les conduites installées dans la cloison.
+
+Le courant descend depuis les ascenseurs raccordés en surface ; les **nœuds énergétiques** peuvent secourir leur réseau local tant qu'il reste de l'énergie stockée. Les réserves d'eau parviennent par les puits raccordés, et une filtration souterraine **réellement alimentée** contribue à la ventilation locale. Une cellule SCP privée d'alimentation/ventilation voit sa conformité diminuer, un laboratoire non raccordé ne produit plus de recherche, et un sas souterrain sans courant ou air sur ses deux côtés suspend son cycle. Les ascenseurs exigent une alimentation physique dans leur puits.
+
+Les **barres de couleur** au bas des modules montrent en coupe l'état du courant (jaune), de l'eau (bleu) et de l'air (vert) : rouge atténué quand le service est interrompu. Les vannes sont accessibles au clavier et au tactile dans le panneau **Réseaux techniques physiques**.
+
+Le marqueur de sauvegarde est désormais **6** ; les schémas plus anciens sont migrés, les connexions orphelines, doubles, géométriquement impossibles ou aux coûts falsifiés sont rejetées. Cette simulation concerne les circuits de distribution et leur disponibilité ; elle n'est **pas encore une simulation volumétrique de fluides, pression, combustion ou plomberie détaillée**, ni une reconstruction SCP canonique universelle.
+
+[Rapport QA et limites détaillées](docs/qa/2026-10-30/UNDERGROUND_TECHNICAL_NETWORKS.md).
+
 ## Lancement rapide
 
 ### Archive avec le build fourni

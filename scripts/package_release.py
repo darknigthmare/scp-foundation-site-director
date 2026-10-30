@@ -9,7 +9,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "test-results" / "package"
-NAME = "scp-builder-operations-underground-airlocks"
+NAME = "scp-builder-operations-physical-utilities"
 
 
 def git(*args):
@@ -38,7 +38,7 @@ def main():
             raise RuntimeError(f"Unexpected private or transient package path: {name}")
     build_info = {
         "gameVersion": json.loads(files["package.json"])["version"],
-        "edition": "Operations — Sas souterrains et réseau X-Y-profondeur (rendu 2.5D)",
+        "edition": "Operations — Réseaux physiques eau air électricité (rendu 2.5D)",
         "sourceCommit": source_commit,
         "workflowRun": os.environ.get("GITHUB_RUN_ID"),
         "gameSha256": sha256(files["dist/game.js"]).hexdigest(),

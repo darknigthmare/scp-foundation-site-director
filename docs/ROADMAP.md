@@ -23,6 +23,10 @@ Tranche du 30 octobre — **cohérence des trois vues ajoutée** : bâtiments du
 - vingt nouveaux événements ;
 - dix SCP supplémentaires à forte personnalité systémique.
 
+### Extension Operations — réseaux techniques réels (30 octobre 2026)
+
+Livré sur la PR : circuits indépendants électricité/eau/air le long des jonctions souterraines, nouvelles gaines payantes, vannes d'isolement, alimentation depuis les puits et nœuds énergétiques, ventilation via filtration alimentée, effet réel sur la conformité SCP, la recherche, les sas et les ascenseurs. Migration de sauvegarde schéma 6 sans connexions fictives. Les réseaux physiques de surface et des annexes, la pression volumétrique, l'incendie et les phénomènes de contamination restent à implémenter.
+
 ## 1.2 — Veil
 
 - ville environnante animée ;

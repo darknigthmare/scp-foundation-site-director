@@ -1,4 +1,4 @@
-const CACHE = "scp-site-director-v1.0.0-r13";
+const CACHE = "scp-site-director-v1.0.0-r14";
 const ASSETS = ["./", "./index.html", "./styles.css", "./game.js", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png", "./ATTRIBUTION.md", "./LICENSE.md"];
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)));

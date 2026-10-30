@@ -46,6 +46,7 @@ function sample(api, depth=0) {
   const dest=room("dest","safe-containment",8,depth,2);
   dest.staffAssigned=[member.id];
   state.undergroundRooms=[...shafts,...tunnels,dest];
+  state.undergroundConduits=api.createLegacyUndergroundConduits(state);
   return {state,member,shafts,tunnels,dest};
 }
 function tick(api,state,n=1){

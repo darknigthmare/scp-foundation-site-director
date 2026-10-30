@@ -2385,3 +2385,33 @@ kbd {
   }
 }
 
+
+/* Coupez transversalement le Site depuis les contrôles accessibles, sans
+   nécessiter 17 clics sur les boutons précédent/suivant. */
+.underground-slice-jump {
+  width: 100%;
+  min-height: 38px;
+  margin: 4px 0 12px;
+  padding: 7px 9px;
+  border: 1px solid rgba(175, 215, 205, .4);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--panel);
+}
+
+/* Underground junction controls share the same compact button rhythm as the
+   surface access editor; interactive on keyboard, tablet and mouse. */
+.underground-gates { margin-block: 12px; }
+.underground-gate-row { padding: 10px 0; border-top: 1px solid rgba(165,198,195,.24); }
+.underground-gate-row strong { display: block; font-size: .92rem; }
+.underground-gate-row small { display: block; opacity: .75; margin: 3px 0 6px; }
+.underground-gate-row .action-row { display:flex; flex-wrap:wrap; gap:5px; margin-block:5px; }
+.underground-gate-row .action-row button { flex:1 1 110px; min-height:32px; font-size: .78rem; }
+
+/* Circuit diagnostics share the same room IDs in the lateral section and plan. */
+.underground-utilities .utility-circuit-row { border-top: 1px solid rgba(170,204,198,.2); padding: 9px 0; }
+.underground-utilities .utility-circuit-row strong { display: block; margin-bottom: 5px; }
+.underground-utilities .utility-status { display: flex; flex-wrap: wrap; gap: 5px; margin: 10px 0; }
+.underground-utilities .utility-indicator { font-size: .78rem; padding: 4px 7px; border-radius: 5px; }
+.underground-utilities .utility-online { color: #b2ecd3; background: rgba(72,144,115,.22); }
+.underground-utilities .utility-offline { color: #f1aaa5; background: rgba(173,73,73,.18); }

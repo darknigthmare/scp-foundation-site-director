@@ -136,8 +136,9 @@ namespace SCPGame {
   const UNDERGROUND_MOVE_SPEED = 0.55;
   const VERTICAL_TRANSFER_MINUTES = 4;
 
-  function undergroundPowerAvailable(state: GameState): boolean {
-    return state.resources.power > 5 && !Boolean(state.flags["surface-blackout"]);
+  function undergroundPowerAvailable(state: GameState, shaft?: UndergroundRoom): boolean {
+    return state.resources.power > 5 && !Boolean(state.flags["surface-blackout"])
+      && (!shaft || getUndergroundUtilityStatus(state, shaft).power);
   }
 
   function undergroundTransitStatus(member: StaffMember): void {
@@ -260,8 +261,8 @@ namespace SCPGame {
       if (!wasTarget) member.taskProgress = 0;
       member.target = nextPoint;
       member.targetRoomId = intentId;
-      if (!undergroundPowerAvailable(state)) {
-        member.routeBlockedReason = "Ascenseur en attente d'alimentation";
+      if (!undergroundPowerAvailable(state, next)) {
+        member.routeBlockedReason = "Ascenseur ou puits sans circuit électrique actif";
         return false;
       }
       member.taskProgress = Math.min(100, member.taskProgress + 100 / VERTICAL_TRANSFER_MINUTES);
@@ -354,8 +355,8 @@ namespace SCPGame {
       return;
     }
     undergroundTransitStatus(member);
-    if (!undergroundPowerAvailable(state)) {
-      member.routeBlockedReason = "Ascenseur en attente d'alimentation";
+    if (!undergroundPowerAvailable(state, portal.shaft)) {
+      member.routeBlockedReason = "Ascenseur ou puits sans circuit électrique actif";
       return;
     }
     member.routeBlockedReason = undefined;
@@ -399,8 +400,8 @@ namespace SCPGame {
     member.path = [];
     member.pathIndex = 0;
     undergroundTransitStatus(member);
-    if (!undergroundPowerAvailable(state)) {
-      member.routeBlockedReason = "Ascenseur en attente d'alimentation";
+    if (!undergroundPowerAvailable(state, portal.shaft)) {
+      member.routeBlockedReason = "Ascenseur ou puits sans circuit électrique actif";
       return;
     }
     member.routeBlockedReason = undefined;
@@ -1042,9 +1043,15 @@ namespace SCPGame {
     const avgTraining = assignedMembers.length ? assignedMembers.reduce((sum, member) => sum + member.experience, 0) / assignedMembers.length : 0;
     score += clamp((avgTraining - procedure.trainingRequired) * 0.15, -12, 8);
 
+    const utilities = getUndergroundUtilityStatus(state, room);
     const powerRatio = state.resources.powerCapacity > 0 ? state.resources.power / state.resources.powerCapacity : 0;
-    if (powerRatio >= scpDefinition.requirements.powerReliability) score += 10;
+    if (!utilities.power) score -= 36;
+    else if (powerRatio >= scpDefinition.requirements.powerReliability) score += 10;
     else score -= (scpDefinition.requirements.powerReliability - powerRatio) * 35;
+    // Life support and water cooling are local services. Global reserves do
+    // not travel across a broken cable, valve or absent physical duct.
+    if (!utilities.air) score -= 26;
+    if (roomDefinition.waterUse > 0 && !utilities.water) score -= 12;
 
     const flags = scpDefinition.requirements.procedureFlags;
     if (flags.includes("backup-power")) score += procedure.backupPower ? 6 : -12;
@@ -1151,8 +1158,12 @@ namespace SCPGame {
       if (room.type === "laboratory") research += 0.45 * efficiency;
       if (room.type === "archive") { research += 0.2 * efficiency; intel += 0.3 * efficiency; }
     });
+    const undergroundUtilities = getUndergroundUtilityMap(state);
     state.undergroundRooms.filter((room) => room.type === "research-lab" && room.enabled).forEach((room) => {
-      research += 0.5 * room.condition / 100;
+      const utilities = undergroundUtilities.get(room.id);
+      // Research equipment needs electricity and climate control; power
+      // stored at the Site does not run a disconnected laboratory.
+      if (utilities?.power && utilities.air) research += 0.5 * room.condition / 100;
     });
     state.resources.research += research;
     state.resources.intel += intel;

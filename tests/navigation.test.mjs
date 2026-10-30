@@ -59,6 +59,7 @@ function prepare(game, keepLayout = false) {
   state.scps = [];
   state.procedures = [];
   state.undergroundRooms = [];
+  state.undergroundConduits = [];
   state.regionFacilities = [];
   if (!keepLayout) state.surfaceRooms = [];
   state.surfaceRooms.forEach((entry) => { entry.staffAssigned = []; entry.queue = []; });

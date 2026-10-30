@@ -14,6 +14,15 @@ namespace SCPGame {
     if (!gate.enabled) return 'Verrouillé';
     if (gate.kind === 'airlock' && (!gate.powered || state.resources.power <= 5 || Boolean(state.flags['surface-blackout']))) return 'Panne électrique — vantaux fermés';
     if (gate.kind === 'airlock' && !gate.airSupply) return 'Air indisponible — sas arrêté';
+    if (gate.kind === 'airlock') {
+      const a = state.undergroundRooms.find((room) => room.id === gate.roomAId);
+      const b = state.undergroundRooms.find((room) => room.id === gate.roomBId);
+      if (!a || !b) return 'Sas sans liaison technique valide';
+      const statusA = getUndergroundUtilityStatus(state, a);
+      const statusB = getUndergroundUtilityStatus(state, b);
+      if (!statusA.power || !statusB.power) return 'Sas hors circuit électrique';
+      if (!statusA.air || !statusB.air) return 'Sas sans ventilation raccordée';
+    }
     if (gate.cycle?.phase === 'equalizing') return `Égalisation — ${gate.cycle.remaining} min`;
     if (gate.cycle?.phase === 'crossing') return 'Transit en cours — accès occupé';
     if (gate.cycle?.phase === 'retreating') return 'Retour sécurisé vers le côté d’origine';
@@ -34,7 +43,11 @@ namespace SCPGame {
       if (!permitted) return false;
     }
     if (gate.kind === 'airlock' && (!gate.powered || !gate.airSupply || state.resources.power <= 5
-      || Boolean(state.flags['surface-blackout']))) return false;
+      || Boolean(state.flags['surface-blackout'])
+      || !getUndergroundUtilityStatus(state, from).power
+      || !getUndergroundUtilityStatus(state, to).power
+      || !getUndergroundUtilityStatus(state, from).air
+      || !getUndergroundUtilityStatus(state, to).air)) return false;
     return true;
   }
 
@@ -160,7 +173,11 @@ namespace SCPGame {
     // lockdown or revoked authorization, by contrast, triggers a slow retreat.
     if (cycle.phase === 'crossing' && !permitted) {
       const utilityFailure = gate.enabled && gate.kind === 'airlock' &&
-        (!gate.powered || !gate.airSupply || state.resources.power <= 5 || Boolean(state.flags['surface-blackout']));
+        (!gate.powered || !gate.airSupply || state.resources.power <= 5 || Boolean(state.flags['surface-blackout'])
+          || !getUndergroundUtilityStatus(state, from).power
+          || !getUndergroundUtilityStatus(state, to).power
+          || !getUndergroundUtilityStatus(state, from).air
+          || !getUndergroundUtilityStatus(state, to).air);
       if (utilityFailure) {
         member.status = 'queued';
         member.routeBlockedReason = getUndergroundGateStatus(state, gate);

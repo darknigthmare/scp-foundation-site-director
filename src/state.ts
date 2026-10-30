@@ -1,6 +1,6 @@
 namespace SCPGame {
   const CONTAINMENT_ROOM_TAGS = ["safe", "euclid", "keter", "humanoid", "bio", "infohazard", "heavy", "temporal"];
-  const LOAD_SCHEMA_VERSION = 5;
+  const LOAD_SCHEMA_VERSION = 6;
   const SURFACE_ACCESS_SIDES: readonly SurfaceAccessSide[] = ["north", "east", "south", "west"];
   const SURFACE_ACCESS_TRAFFIC: readonly SurfaceTraffic[] = ["public", "staff", "security", "medical", "contaminated", "freight", "anomaly"];
   const SURFACE_ACCESS_COSTS: Record<SurfaceAccess["kind"], { funds: number; parts: number }> = {
@@ -346,6 +346,7 @@ namespace SCPGame {
       surfaceRooms: createInitialSurfaceRooms(),
       undergroundRooms: createInitialUndergroundRooms(),
       undergroundGates: [],
+      undergroundConduits: [],
       staff: createInitialStaff(seed),
       workItems: [],
       scps,
@@ -380,6 +381,7 @@ namespace SCPGame {
       victory: false
     };
 
+    state.undergroundConduits = createLegacyUndergroundConduits(state);
     state.surfaceRooms.forEach((room) => room.accessPoints = createDefaultSurfaceAccesses(state, room));
     autoAssignStaff(state);
     logHistory(state, "Prise de commandement du Site Deep Protocol.");
@@ -806,6 +808,10 @@ namespace SCPGame {
         && Math.abs((member.position.sectionY ?? getLegacyUndergroundSectionY(state)) - undergroundRoomSectionY(state, room)) < 0.0001
         && member.position.x >= room.x && member.position.x <= room.x + room.width))
         return { ok: false, message: "Évacuez le personnel présent avant de démanteler ce module." };
+      for (const line of [...state.undergroundConduits ?? []]) {
+        if (line.roomAId === room.id || line.roomBId === room.id)
+          removeUndergroundConduit(state, line.roomAId, line.roomBId);
+      }
       for (const gate of [...state.undergroundGates ?? []]) {
         if (gate.roomAId === room.id || gate.roomBId === room.id) removeUndergroundGate(state, gate.id);
       }
@@ -1356,6 +1362,13 @@ namespace SCPGame {
       resources: (value) => numericRecord(value), reputation: (value) => numericRecord(value),
       regionFacilities: array(facility), surfaceRooms: array(surfaceRoom), undergroundRooms: array(undergroundRoom),
       undergroundGates: array(undergroundGate),
+      undergroundConduits: array((value) => shape(value, {
+        roomAId: id, roomBId: id, power: boolean, water: boolean, air: boolean,
+        paidFunds: finite, paidParts: finite
+      }, ["roomAId", "roomBId", "power", "water", "air", "paidFunds", "paidParts"])
+        && record(value) && value.roomAId !== value.roomBId
+        && Number(value.paidFunds) >= 0 && Number(value.paidFunds) <= UNDERGROUND_CONDUIT_COST.funds
+        && Number(value.paidParts) >= 0 && Number(value.paidParts) <= UNDERGROUND_CONDUIT_COST.parts),
       staff: array(member), workItems: array(workItem), scps: array(scp), procedures: array(procedure),
       researchNodes: array((value) => shape(value, { id, completed: boolean }, ["id"])), events: array(event),
       campaign: array(chapter), notifications: array(notification), history: stringArray,
@@ -1430,6 +1443,11 @@ namespace SCPGame {
     const seed = Number.isFinite(raw.seed) ? Number(raw.seed) : Date.now();
     const defaults = createNewGame(mode, difficulty, seed);
     if (!hasValidLoadedFields(candidate, defaults)) return undefined;
+    // A current-format save must not regain deleted/rejected circuits by
+    // pretending that its missing network is a historical omission.
+    const marker = raw.flags?.["load-schema-version"];
+    if (typeof marker === "number" && marker >= LOAD_SCHEMA_VERSION
+      && raw.undergroundConduits === undefined) return undefined;
     const objectValue = <T extends object>(value: unknown, fallback: T): T => value && typeof value === "object" && !Array.isArray(value) ? { ...fallback, ...(value as Partial<T>) } : fallback;
     const arrayValue = <T>(value: unknown, fallback: T[]): T[] => Array.isArray(value) && value.every((entry) => entry && typeof entry === "object") ? value as T[] : fallback;
     const state: GameState = {
@@ -1445,6 +1463,8 @@ namespace SCPGame {
       surfaceRooms: arrayValue<SurfaceRoom>(raw.surfaceRooms, defaults.surfaceRooms),
       undergroundRooms: arrayValue<UndergroundRoom>(raw.undergroundRooms, defaults.undergroundRooms),
       undergroundGates: arrayValue<UndergroundGate>(raw.undergroundGates, []),
+      undergroundConduits: raw.undergroundConduits === undefined ? []
+        : arrayValue<UndergroundConduit>(raw.undergroundConduits, []),
       staff: arrayValue<StaffMember>(raw.staff, defaults.staff),
       workItems: arrayValue<WorkItem>(raw.workItems, defaults.workItems),
       scps: arrayValue<SCPInstance>(raw.scps, defaults.scps),
@@ -1512,6 +1532,20 @@ namespace SCPGame {
       const tags = getUndergroundDefinition(room.type).tags;
       room.powerPriority = room.powerPriority ?? (tags.includes("keter") || tags.includes("bio") ? 3 : 2);
     });
+
+    // Old saves carried no service circuits, so fully commission exactly the
+    // existing contiguous links. New rooms always need explicit construction.
+    if (raw.undergroundConduits === undefined)
+      state.undergroundConduits = createLegacyUndergroundConduits(state);
+    const conduitKeys = new Set<string>();
+    for (const conduit of state.undergroundConduits ?? []) {
+      const first = state.undergroundRooms.find((room) => room.id === conduit.roomAId);
+      const second = state.undergroundRooms.find((room) => room.id === conduit.roomBId);
+      const key = [conduit.roomAId, conduit.roomBId].sort().join(":");
+      if (!first || !second || !undergroundRoomsTouch(state, first, second)
+        || conduitKeys.has(key)) return undefined;
+      conduitKeys.add(key);
+    }
     // An old save without gates remains an open physical corridor. Explicit
     // gates are checked against actual adjacent modules, not just string IDs.
     const memberById = new Map(state.staff.map((member) => [member.id, member]));

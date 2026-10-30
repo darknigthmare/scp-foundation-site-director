@@ -189,6 +189,24 @@ def run():
                 page.screenshot(path=str(OUT / "underground-network.png"), full_page=True)
             step("habilitation, liaison et scellement du souterrain", underground_network_panel)
 
+            def physical_utility_circuits():
+                panel = page.locator("#right-panel")
+                expect(panel).to_contain_text("Réseaux techniques physiques")
+                expect(panel).to_contain_text("Électricité")
+                expect(panel).to_contain_text("Ventilation")
+                water = panel.locator('.underground-utilities button[data-action="underground-conduit-toggle"][data-kind="water"]').first
+                expect(water).to_be_visible()
+                expect(water).to_have_attribute("aria-pressed", "true")
+                water.click()
+                expect(water).to_have_attribute("aria-pressed", "false")
+                expect(panel).to_contain_text("Eau : Coupée")
+                page.screenshot(path=str(OUT / "underground-utility-water-cut.png"), full_page=True)
+                water.click()
+                expect(water).to_have_attribute("aria-pressed", "true")
+                expect(panel).to_contain_text("Eau : Distribuée")
+                page.screenshot(path=str(OUT / "underground-utilities.png"), full_page=True)
+            step("réseaux physiques du sous-sol, coupure et remise en eau", physical_utility_circuits)
+
             def underground_gate_ui():
                 panel = page.locator("#right-panel")
                 expect(panel).to_contain_text("Portes et sas souterrains")

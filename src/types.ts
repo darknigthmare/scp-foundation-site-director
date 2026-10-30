@@ -219,6 +219,18 @@ namespace SCPGame {
     paidParts: number;
   }
 
+
+  /** Installed cable/pipe/duct bundle between two physically adjacent modules. */
+  export interface UndergroundConduit {
+    roomAId: string;
+    roomBId: string;
+    power: boolean;
+    water: boolean;
+    air: boolean;
+    paidFunds: number;
+    paidParts: number;
+  }
+
   export interface UndergroundRoom {
     id: string;
     type: UndergroundRoomType;
@@ -519,6 +531,8 @@ namespace SCPGame {
     undergroundRooms: UndergroundRoom[];
     /** Configured physical junctions; absent on old saves. */
     undergroundGates?: UndergroundGate[];
+    /** True physical service circuits, no automatic links for new modules. */
+    undergroundConduits?: UndergroundConduit[];
     /** Region annex whose derived interior is currently being inspected. */
     activeInteriorFacilityId?: string;
     staff: StaffMember[];

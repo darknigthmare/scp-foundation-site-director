@@ -42,6 +42,7 @@ function prepare(game, count = 1) {
   state.staff = [...engineers, third].slice(0, count);
   state.surfaceRooms = [room];
   state.undergroundRooms = [];
+  state.undergroundConduits = [];
   state.staff.forEach((member) => {
     member.position = { layer: "surface", x: 7, y: 5 };
     member.assignmentRoomId = room.id;
@@ -126,7 +127,7 @@ test("la migration des entrées conserve les identités et les ressources sans r
   assert.deepEqual(Array.from(migrated.surfaceRooms, (room) => room.id), Array.from(old.surfaceRooms, (room) => room.id));
   assert.deepEqual(plain(migrated.resources), plain(old.resources));
   assert.deepEqual(plain(migrated.surfaceRooms.map((room) => room.accessPoints)), plain(again.surfaceRooms.map((room) => room.accessPoints)));
-  assert.equal(migrated.flags["load-schema-version"], 5);
+  assert.equal(migrated.flags["load-schema-version"], 6);
   migrated.surfaceRooms[0].accessPoints = [];
   const sealed = game.importSave(JSON.stringify(migrated));
   assert.ok(sealed);
@@ -136,9 +137,9 @@ test("la migration des entrées conserve les identités et les ressources sans r
 test("un marqueur de schéma futur ou mal formé ne peut pas être rétrogradé silencieusement", () => {
   const game = loadGameNamespace();
   const current = game.createNewGame("campaign", "standard", 8004);
-  assert.equal(current.flags["load-schema-version"], 5);
+  assert.equal(current.flags["load-schema-version"], 6);
   const snapshot = JSON.stringify(current);
-  for (const marker of [6, -1, 1.5, "5", true, null]) {
+  for (const marker of [7, -1, 1.5, "6", true, null]) {
     const candidate = JSON.parse(snapshot);
     candidate.flags["load-schema-version"] = marker;
     assert.equal(game.importSave(JSON.stringify(candidate)), undefined, String(marker));
@@ -150,7 +151,7 @@ test("un marqueur de schéma futur ou mal formé ne peut pas être rétrogradé 
     candidate.surfaceRooms.forEach((room) => { delete room.accessPoints; });
     const migrated = game.importSave(JSON.stringify(candidate));
     assert.ok(migrated);
-    assert.equal(migrated.flags["load-schema-version"], 5);
+    assert.equal(migrated.flags["load-schema-version"], 6);
     assert.equal(migrated.staff[0].id, current.staff[0].id);
   }
   assert.equal(JSON.stringify(current), snapshot);

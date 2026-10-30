@@ -2407,3 +2407,11 @@ kbd {
 .underground-gate-row small { display: block; opacity: .75; margin: 3px 0 6px; }
 .underground-gate-row .action-row { display:flex; flex-wrap:wrap; gap:5px; margin-block:5px; }
 .underground-gate-row .action-row button { flex:1 1 110px; min-height:32px; font-size: .78rem; }
+
+/* Circuit diagnostics share the same room IDs in the lateral section and plan. */
+.underground-utilities .utility-circuit-row { border-top: 1px solid rgba(170,204,198,.2); padding: 9px 0; }
+.underground-utilities .utility-circuit-row strong { display: block; margin-bottom: 5px; }
+.underground-utilities .utility-status { display: flex; flex-wrap: wrap; gap: 5px; margin: 10px 0; }
+.underground-utilities .utility-indicator { font-size: .78rem; padding: 4px 7px; border-radius: 5px; }
+.underground-utilities .utility-online { color: #b2ecd3; background: rgba(72,144,115,.22); }
+.underground-utilities .utility-offline { color: #f1aaa5; background: rgba(173,73,73,.18); }

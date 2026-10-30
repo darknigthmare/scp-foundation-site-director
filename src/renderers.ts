@@ -707,7 +707,8 @@ namespace SCPGame {
     drawUndergroundSurfaceStrip(ctx, runtime, metrics);
     const cut = getSiteSectionSurfaceY(state);
     const visibleRooms = state.undergroundRooms.filter((room) => undergroundRoomSectionY(state, room) === cut);
-    visibleRooms.forEach((room) => drawUndergroundRoom(ctx, runtime, room, metrics));
+    const utilityMap = getUndergroundUtilityMap(state);
+    visibleRooms.forEach((room) => drawUndergroundRoom(ctx, runtime, room, metrics, utilityMap));
     // Junctions across the current cut are visible; neighbouring transverse
     // links have directional markers, not fictitious on-screen corridors.
     const accessible = visibleRooms.filter((room) => canStaffEnterUndergroundRoom(room));
@@ -936,7 +937,9 @@ namespace SCPGame {
     // possèdent maintenant une coordonnée transversale et une profondeur réelle.
   }
 
-  function drawUndergroundRoom(ctx: CanvasRenderingContext2D, runtime: RuntimeState, room: UndergroundRoom, metrics: { cellW: number; levelH: number; originX: number; originY: number }): void {
+  function drawUndergroundRoom(ctx: CanvasRenderingContext2D, runtime: RuntimeState, room: UndergroundRoom,
+    metrics: { cellW: number; levelH: number; originX: number; originY: number },
+    utilityMap: Map<string, UndergroundUtilityStatus>): void {
     const state = runtime.state;
     const definition = getUndergroundDefinition(room.type);
     const selected = state.selectedType === "underground-room" && state.selectedId === room.id;
@@ -954,6 +957,16 @@ namespace SCPGame {
     ctx.strokeStyle = selected ? "#79d9b8" : room.sealed ? "#e3b960" : room.condition < 45 ? "#dc6d65" : "rgba(235,241,241,.25)";
     ctx.lineWidth = selected ? 2 : 1;
     ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+    const utilities = utilityMap.get(room.id) ?? { power: false, water: false, air: false };
+    // Three bars fit inside even a one-cell lift shaft.
+    const barStride = Math.max(4, Math.min(11, (w - 10) / 3));
+    for (const [index, ok, color] of [
+      [0, utilities.power, "#edd67d"], [1, utilities.water, "#83baf5"],
+      [2, utilities.air, "#93e4b5"]
+    ] as const) {
+      ctx.fillStyle = ok ? color : "#874c51";
+      ctx.fillRect(x + 5 + index * barStride, y + h - 16, Math.max(2, barStride - 2), 3);
+    }
 
     if (room.type === "elevator-shaft") {
       ctx.strokeStyle = "rgba(225,235,237,.45)";

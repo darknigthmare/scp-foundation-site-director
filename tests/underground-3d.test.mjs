@@ -42,6 +42,7 @@ function fixture(g) {
   const west=dig('west','service-tunnel',9,13,0,4);
   const destination=dig('destination','safe-containment',7,13,0,2);
   s.undergroundRooms=[shaft,hall,north,west,destination];
+  s.undergroundConduits=g.createLegacyUndergroundConduits(s);
   return {s,m,shaft,hall,north,west,destination};
 }
 
