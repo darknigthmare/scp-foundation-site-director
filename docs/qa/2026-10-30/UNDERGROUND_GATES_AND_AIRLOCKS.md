@@ -15,7 +15,7 @@
 
 - **Tests métier validés dans GitHub Actions : 132/132 réussis** (13 tests supplémentaires relatifs aux portes et sas ; compilation TypeScript stricte, validation structurelle).
 - **Navigateur local : non vérifié** (l'accès à `127.0.0.1` dans Chromium renvoie `ERR_BLOCKED_BY_ADMINISTRATOR` dans cet environnement). Le parcours Chromium GitHub Actions est la validation autoritative des interactions et captures.
-- **CI du commit fonctionnel :** [GitHub Actions #41060363210](https://github.com/darknigthmare/scp-foundation-site-director/actions/runs/41060363210) — succès, **132/132 tests métier, 21/21 étapes Chromium, 0 message navigateur**. Capture `underground-airlock.png` et ZIP cumulatif disponibles dans les artefacts de cette exécution. La dernière retouche de rendu transversal et le changement de nom d'archive nécessitent une nouvelle validation CI.
+- **CI du commit fonctionnel :** [GitHub Actions #41060363210](https://github.com/darknigthmare/scp-foundation-site-director/actions/runs/41060363210) — succès, **132/132 tests métier, 21/21 étapes Chromium, 0 message navigateur**. Capture `underground-airlock.png` et ZIP cumulatif disponibles dans les artefacts de cette exécution. La retouche de rendu transversal et le nouveau packaging ont également passé [la CI complète #41061053227](https://github.com/darknigthmare/scp-foundation-site-director/actions/runs/41061053227) : **132/132 tests, 21/21 étapes Chromium, 0 message navigateur**. L'archive `scp-builder-operations-underground-airlocks.zip` (122 fichiers) a été générée et contrôlée ; son SHA-256 est `436df0bc17cb86558cb948233c0885c0e8453f4444e3c76a1d73402b32010582`. La somme SHA-256 de `dist/game.js` est `c5685dae61bf16474f50a53a7eeb3d8925a92306776104b62894a43c1bee4639`.
 
 ## Limites
 
