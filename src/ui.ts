@@ -250,7 +250,7 @@ namespace SCPGame {
           ["Suspicion", signed(definition.suspicionImpact ?? 0)]
         ])}
         ${isRegionFacilityEnterable(selected)
-          ? `<button class="wide-button" data-view="surface">Explorer l'intérieur de cette annexe</button>
+          ? `<button class="wide-button" data-action="enter-annex">Explorer l'intérieur de cette annexe</button>
              <p class="hint">Plan intérieur propre à ce bâtiment, lié à son état réel. Les zones sont consultatives et ne génèrent pas de personnel fictif.</p>`
           : `<p class="hint">Installation extérieure sans pièces closes : vue régionale uniquement.</p>`}
         ${renderSelectionActions()}
@@ -1124,6 +1124,7 @@ namespace SCPGame {
       case "underground-level-next": result = setUndergroundPlanLevel(state, getUndergroundPlanLevel(state) + 1); break;
       case "underground-slice-prev": result = setUndergroundSlice(state, getSiteSectionSurfaceY(state) - 1); break;
       case "underground-slice-next": result = setUndergroundSlice(state, getSiteSectionSurfaceY(state) + 1); break;
+      case "enter-annex": result = openAnnexInterior(state, String(state.selectedId)); break;
       case "open-main-interior": {
         state.activeInteriorFacilityId = undefined;
         state.flags["annex-room-selected"] = "";

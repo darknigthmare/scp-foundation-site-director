@@ -230,7 +230,7 @@ def run():
                 canvas.click(position={"x": x, "y": y})
                 panel = page.locator("#right-panel")
                 expect(panel).to_contain_text("Explorer l'intérieur de cette annexe")
-                panel.locator('button[data-view="surface"]').click()
+                panel.locator('button[data-action="enter-annex"]').click()
                 expect(panel).to_contain_text("Salle des turbines")
                 expect(panel).to_contain_text("Plan intérieur de l'installation extérieure")
                 page.screenshot(path=str(OUT / "annex-power-plant.png"), full_page=True)

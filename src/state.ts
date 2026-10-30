@@ -461,13 +461,8 @@ namespace SCPGame {
       ? state.regionFacilities.find((facility) => facility.id === state.activeInteriorFacilityId) : undefined;
     state.view = view;
     state.buildSelection = undefined;
-    if (view === "surface" && ((selectedFacility && isRegionFacilityEnterable(selectedFacility)) || existingAnnex)) {
-      const facility = (selectedFacility && isRegionFacilityEnterable(selectedFacility) ? selectedFacility : existingAnnex)!;
-      state.activeInteriorFacilityId = facility.id;
-      state.selectedId = facility.id;
-      state.selectedType = "facility";
-      return;
-    }
+    // The global Surface tab always opens the primary Site interior. Viewing
+    // a regional building's annex requires the explicit Explore action below.
     state.activeInteriorFacilityId = undefined;
     if (view === "region" && (selectedFacility || existingAnnex)) {
       const facility = selectedFacility ?? existingAnnex!;
@@ -497,6 +492,19 @@ namespace SCPGame {
       state.selectedId = undefined;
       state.selectedType = undefined;
     }
+  }
+
+  export function openAnnexInterior(state: GameState, facilityId: string): { ok: boolean; message: string } {
+    const facility = state.regionFacilities.find((entry) => entry.id === facilityId);
+    if (!facility || !isRegionFacilityEnterable(facility))
+      return { ok: false, message: "Cette installation ne possède pas de plan intérieur." };
+    state.view = "surface";
+    state.activeInteriorFacilityId = facility.id;
+    state.selectedId = facility.id;
+    state.selectedType = "facility";
+    state.buildSelection = undefined;
+    state.flags["annex-room-selected"] = "";
+    return { ok: true, message: `${getRegionDefinition(facility.type).name} : plan intérieur ouvert.` };
   }
 
   export function setSpeed(state: GameState, speed: GameSpeed): void {

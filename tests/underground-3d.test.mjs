@@ -214,7 +214,7 @@ test('la sélection depuis la ville ouvre la bonne annexe puis retrouve le même
   const g=engine(),s=g.createNewGame('sandbox','standard',58);
   const plant=s.regionFacilities.find(f=>f.type==='power-plant');assert.ok(plant);
   s.view='region';s.selectedId=plant.id;s.selectedType='facility';
-  g.setView(s,'surface');
+  assert.equal(g.openAnnexInterior(s,plant.id).ok,true);
   assert.equal(s.activeInteriorFacilityId,plant.id);
   assert.equal(g.getActiveInteriorFacility(s)?.id,plant.id);
   assert.equal(g.getAnnexInteriorPlan(s,plant).rooms[0].name,'Salle des turbines');
@@ -228,7 +228,7 @@ test('la sauvegarde d’une annexe conserve son identité et ses ressources, une
   const g=engine(),s=g.createNewGame('sandbox','standard',59);
   const facility=s.regionFacilities.find(f=>f.type==='water-treatment');
   s.view='region';s.selectedId=facility.id;s.selectedType='facility';
-  g.setView(s,'surface');
+  assert.equal(g.openAnnexInterior(s,facility.id).ok,true);
   s.flags['annex-room-selected']=`${facility.id}:control`;
   const cost=plain(s.resources),snapshot=JSON.stringify(s);
   const loaded=g.importSave(snapshot);assert.ok(loaded);
@@ -270,4 +270,21 @@ test('une sauvegarde falsifiée ne peut pas déplacer un agent via un faux embra
   m.position={layer:'underground',x:25,y:0,level:0,sectionY:13.4};
   m.undergroundLink={fromId:'hall',toId:'north',crossingX:25};
   assert.equal(g.importSave(JSON.stringify(s)),undefined);
+});
+
+
+test('le menu Surface reste le Site principal même si une annexe est sélectionnée',()=>{
+  const g=engine(),s=g.createNewGame('sandbox','standard',61);
+  const plant=s.regionFacilities.find(f=>f.type==='power-plant');
+  s.view='region';s.selectedType='facility';s.selectedId=plant.id;
+  g.setView(s,'surface');
+  assert.equal(s.view,'surface');
+  assert.equal(s.activeInteriorFacilityId,undefined);
+  assert.equal(g.getActiveInteriorFacility(s),undefined);
+  assert.equal(s.selectedType,undefined);
+  g.setView(s,'region');s.selectedType='facility';s.selectedId=plant.id;
+  assert.equal(g.openAnnexInterior(s,plant.id).ok,true);
+  assert.equal(g.getActiveInteriorFacility(s).id,plant.id);
+  g.setView(s,'region');
+  assert.equal(s.selectedId,plant.id);
 });
