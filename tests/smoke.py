@@ -111,7 +111,7 @@ def run():
                 if layer == "region":
                     tile_w = max(26, min(54, width / 15))
                     tile_h = tile_w * 0.48
-                    grid_x, grid_y = 17, 12
+                    grid_x, grid_y = 17, 0
                     local_x = width * 0.5 + (grid_x - grid_y) * tile_w * 0.5 + tile_w * 0.12
                     local_y = 54 + (grid_x + grid_y) * tile_h * 0.5 + tile_h * 0.38
                 elif layer == "surface":
@@ -181,6 +181,40 @@ def run():
                 expect(panel).to_contain_text("Ouverte")
                 page.screenshot(path=str(OUT / "underground-network.png"), full_page=True)
             step("habilitation, liaison et scellement du souterrain", underground_network_panel)
+
+            def coherent_three_views():
+                panel = page.locator("#right-panel")
+                expect(panel).to_contain_text("À l'aplomb")
+                expect(panel).to_contain_text("Coupe")
+                page.screenshot(path=str(OUT / "site-section.png"), full_page=True)
+                panel.locator('button[data-view="surface"]').click()
+                expect(panel).to_contain_text("Voir ce bâtiment dans la ville")
+                page.screenshot(path=str(OUT / "site-interior.png"), full_page=True)
+                panel.locator('button[data-view="region"]').click()
+                expect(panel).to_contain_text("Toiture du bâtiment principal")
+                page.screenshot(path=str(OUT / "site-roof.png"), full_page=True)
+                # Click a different specific roof in the projected exterior plan.
+                # The hit must select the SAME medical-room ID as the interior.
+                canvas = page.locator("#game-canvas")
+                box = canvas.bounding_box()
+                assert box is not None
+                width = box["width"]
+                tile_w = max(26, min(54, width / 15))
+                tile_h = tile_w * 0.48
+                world_x = 10 + 16 * 9 / 26
+                world_y = 9 + 2 * 5 / 17
+                x = width * .5 + (world_x - world_y) * tile_w * .5
+                y = 54 + (world_x + world_y) * tile_h * .5
+                canvas.click(position={"x": x, "y": y})
+                expect(panel).to_contain_text("Toiture du bâtiment principal")
+                panel.locator('button[data-view="surface"]').click()
+                expect(panel).to_contain_text("Cette salle possède la même emprise")
+                page.screenshot(path=str(OUT / "site-room-linked.png"), full_page=True)
+                # Return to the subsoil without fabricating a connection to a
+                # medical room outside the longitudinal A-A section.
+                page.locator('button[data-view="underground"]').first.click()
+                expect(panel).to_contain_text("Coupe A-A")
+            step("même Site dans les trois vues, toitures et coupe A-A", coherent_three_views)
 
 
             def management():

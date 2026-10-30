@@ -19,7 +19,7 @@ function game() {
   return context.SCPGame;
 }
 function lift(id="lift",x=17) {
-  return { id, type:"elevator",x,y:1,width:4,height:3,level:1,condition:100,cleanliness:100,
+  return { id, type:"elevator",x,y:12,width:4,height:4,level:1,condition:100,cleanliness:100,
     staffAssigned:[],queue:[],upgrades:[],enabled:true,powerPriority:3 };
 }
 function room(id,type,x,level,width) {
@@ -37,7 +37,7 @@ function sample(api, depth=0) {
   state.flags["last-work-spawn"]=100000;
   state.resources.power=100;
   member.clearance=5; member.shift="day"; member.status="working";
-  member.position={layer:"surface",x:19,y:2}; member.target=undefined;
+  member.position={layer:"surface",x:19,y:14}; member.target=undefined;
   member.targetRoomId=undefined; member.assignmentRoomId="dest";
   member.taskProgress=0; member.path=[]; member.pathIndex=0;
   Object.assign(member.needs,{fatigue:0,hunger:0,stress:0,morale:90,health:100,contamination:0});

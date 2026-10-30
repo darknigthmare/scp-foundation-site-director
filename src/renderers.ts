@@ -178,6 +178,7 @@ namespace SCPGame {
 
     const facilities = [...state.regionFacilities].sort((a, b) => (a.x + a.y) - (b.x + b.y));
     facilities.forEach((facility) => drawRegionFacility(ctx, runtime, facility, width));
+    drawRegionSiteCampus(runtime, width);
 
     if (hover && state.view === "region") {
       const point = regionToScreen(runtime, width, hover.x, hover.y);
@@ -185,12 +186,79 @@ namespace SCPGame {
       drawDiamond(ctx, point, metrics.tileW, metrics.tileH, valid ? "rgba(106,210,175,.22)" : "rgba(230,92,92,.22)", valid ? "#72d2b0" : "#e05c5c");
     }
 
-    drawCanvasTitle(ctx, "RÉGION ET COUVERTURE", "Routes publiques, fournisseurs, réseaux, ville et discrétion opérationnelle", width);
+    drawCanvasTitle(ctx, "RÉGION ET SITE", "Vue extérieure : ville, annexes et toitures du même complexe intérieur", width);
     drawLegend(ctx, width, height, [
       ["Couverture", Math.round(state.reputation.cover), "#73c9a3"],
       ["Suspicion", Math.round(state.reputation.suspicion), "#e58b65"],
       ["Installations", state.regionFacilities.length, "#9ab7cf"]
     ]);
+  }
+
+  function drawRegionSiteCampus(runtime: RuntimeState, width: number): void {
+    const state = runtime.state;
+    const ctx = runtime.context;
+    const bounds = getSiteRegionFootprint(state);
+    const metrics = regionMetrics(runtime, width);
+    const polygon = (x: number, y: number, w: number, h: number): void => {
+      const a = regionToScreen(runtime, width, x, y);
+      const b = regionToScreen(runtime, width, x + w, y);
+      const c = regionToScreen(runtime, width, x + w, y + h);
+      const d = regionToScreen(runtime, width, x, y + h);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+      ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.closePath();
+    };
+
+    // Exterior shell and roofs are 100% derived from the current surface-room
+    // collection: building/removing a room immediately updates its roof.
+    ctx.save();
+    polygon(bounds.x, bounds.y, bounds.width, bounds.height);
+    ctx.fillStyle = "rgba(11,24,31,.96)";
+    ctx.strokeStyle = "rgba(104,221,194,.95)";
+    ctx.lineWidth = 2;
+    ctx.fill(); ctx.stroke();
+
+    const rooms = [...state.surfaceRooms].sort((a, b) =>
+      (a.type === "corridor" ? -1 : 0) - (b.type === "corridor" ? -1 : 0));
+    for (const room of rooms) {
+      const roof = getSurfaceRegionFootprint(state, room);
+      const selected = state.selectedType === "surface-room" && state.selectedId === room.id;
+      polygon(roof.x, roof.y, roof.width, roof.height);
+      ctx.fillStyle = room.type === "corridor" ? "rgba(80,95,103,.85)" : SURFACE_COLORS[room.type];
+      ctx.globalAlpha = room.enabled ? 0.87 : 0.28;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = selected ? "#fff1a5" : "rgba(227,241,237,.34)";
+      ctx.lineWidth = selected ? 2.5 : 0.7;
+      ctx.stroke();
+      if (selected || room.type === "elevator") {
+        const center = regionToScreen(runtime, width, roof.x + roof.width / 2, roof.y + roof.height / 2);
+        ctx.fillStyle = selected ? "#fff1a5" : "#d0e7fa";
+        ctx.font = "700 12px system-ui";
+        ctx.textAlign = "center";
+        ctx.fillText(selected ? getSurfaceDefinition(room.type).name : "⇩", center.x, center.y - 5);
+      }
+    }
+    const label = regionToScreen(runtime, width, bounds.x + bounds.width / 2, bounds.y + bounds.height + 0.5);
+    ctx.globalAlpha = 1;
+    ctx.textAlign = "center";
+    ctx.font = "700 11px system-ui";
+    ctx.fillStyle = "#bcebdc";
+    ctx.fillText("SITE PRINCIPAL · TOITURES", label.x, label.y);
+    ctx.font = "10px system-ui";
+    ctx.fillStyle = "rgba(209,233,227,.82)";
+    ctx.fillText(`${state.surfaceRooms.filter((room) => room.type !== "corridor").length} salles reliées au plan intérieur`, label.x, label.y + 13);
+    // Three-scale reference: horizontal x is maintained in all projections.
+    const section = getSiteSectionSurfaceY(state);
+    const p1 = surfaceToRegionPosition(state, { x: 0, y: section });
+    const p2 = surfaceToRegionPosition(state, { x: state.surfaceWidth, y: section });
+    const a = regionToScreen(runtime, width, p1.x, p1.y);
+    const b = regionToScreen(runtime, width, p2.x, p2.y);
+    ctx.strokeStyle = "rgba(255,214,120,.8)";
+    ctx.lineWidth = Math.max(1, metrics.tileW / 45);
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
   }
 
   function drawRegionalCity(ctx: CanvasRenderingContext2D, runtime: RuntimeState, width: number, height: number): void {
@@ -298,6 +366,7 @@ namespace SCPGame {
 
     [...state.surfaceRooms].sort((a, b) => a.type === "corridor" ? -1 : b.type === "corridor" ? 1 : 0).forEach((room) => drawSurfaceRoom(ctx, runtime, room, metrics));
     state.surfaceRooms.forEach((room) => drawSurfaceAccesses(ctx, runtime, room, metrics));
+    drawSiteSurfaceSection(ctx, runtime, metrics);
     drawSurfaceStaff(ctx, runtime, metrics);
 
     if (runtime.hoveredCell) {
@@ -313,7 +382,7 @@ namespace SCPGame {
       ctx.strokeRect(metrics.originX + hover.x * metrics.cell, metrics.originY + hover.y * metrics.cell, w * metrics.cell, h * metrics.cell);
     }
 
-    drawCanvasTitle(ctx, "COMPLEXE DE SURFACE", "Accès contrôlés, sas, files et personnel", width);
+    drawCanvasTitle(ctx, "INTÉRIEUR DU SITE", "Même bâtiment que la vue Région · plan des pièces · coupe A-A vers le sous-sol", width);
     const queues = state.surfaceRooms.reduce((sum, room) => sum + room.queue.length
       + getSurfaceAccesses(state, room).reduce((waiting, access) => waiting + access.queue.length, 0), 0) + state.workItems.length;
     drawLegend(ctx, width, height, [
@@ -321,6 +390,37 @@ namespace SCPGame {
       ["Files", queues, queues > 12 ? "#e36e68" : "#d5bd6a"],
       ["Énergie", Math.round(state.resources.power), "#d6c868"]
     ]);
+  }
+
+  function drawSiteSurfaceSection(ctx: CanvasRenderingContext2D, runtime: RuntimeState,
+    metrics: { cell: number; originX: number; originY: number }): void {
+    const state = runtime.state;
+    const y = metrics.originY + (getSiteSectionSurfaceY(state) + 0.5) * metrics.cell;
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,206,118,.7)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(metrics.originX, y);
+    ctx.lineTo(metrics.originX + state.surfaceWidth * metrics.cell, y);
+    ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(13,22,27,.9)";
+    ctx.fillRect(metrics.originX + 4, y - 21, 118, 16);
+    ctx.fillStyle = "#ffdda0";
+    ctx.font = "700 10px system-ui";
+    ctx.fillText("COUPE SOUS-SOL A-A", metrics.originX + 9, y - 9);
+    for (const portal of getUndergroundPortals(state)) {
+      const center = undergroundXToSurfaceX(state, portal.shaft.x + portal.shaft.width / 2);
+      const x = metrics.originX + center * metrics.cell;
+      ctx.beginPath(); ctx.arc(x, y, Math.max(5, metrics.cell * 0.18), 0, Math.PI * 2);
+      ctx.fillStyle = "#c5f7e5"; ctx.fill();
+      ctx.strokeStyle = "#17353d"; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = "#12323a";
+      ctx.textAlign = "center"; ctx.font = "700 9px system-ui";
+      ctx.fillText("⇅", x, y + 3);
+    }
+    ctx.textAlign = "left";
+    ctx.restore();
   }
 
   function drawSurfaceRoom(ctx: CanvasRenderingContext2D, runtime: RuntimeState, room: SurfaceRoom, metrics: { cell: number; originX: number; originY: number }): void {
@@ -539,6 +639,7 @@ namespace SCPGame {
       }
     }
 
+    drawUndergroundSurfaceStrip(ctx, runtime, metrics);
     state.undergroundRooms.forEach((room) => drawUndergroundRoom(ctx, runtime, room, metrics));
     // Draw only physical junctions, never imaginary shortcuts through rock.
     const accessible = state.undergroundRooms.filter((room) => canStaffEnterUndergroundRoom(room));
@@ -577,7 +678,7 @@ namespace SCPGame {
       ctx.strokeRect(metrics.originX + hover.x * metrics.cellW, metrics.originY + hover.y * metrics.levelH + 4, roomWidth * metrics.cellW, metrics.levelH - 10);
     }
 
-    drawCanvasTitle(ctx, "COMPLEXE SOUTERRAIN", "Excavation verticale, réseaux critiques, cellules uniques et confinement profond", width);
+    drawCanvasTitle(ctx, "SOUS LE MÊME SITE", "Coupe A-A sous les bâtiments de surface · puits à l'aplomb des ascenseurs", width);
     const contained = state.scps.filter((scp) => scp.contained).length;
     const maxRisk = Math.max(0, ...state.scps.filter((scp) => scp.contained).map((scp) => scp.breachRisk));
     drawLegend(ctx, width, height, [
@@ -585,6 +686,46 @@ namespace SCPGame {
       ["SCP confinés", contained, "#73c9a3"],
       ["Risque max", Math.round(maxRisk), maxRisk > 70 ? "#e36e68" : "#d5bd6a"]
     ]);
+  }
+
+  function drawUndergroundSurfaceStrip(ctx: CanvasRenderingContext2D, runtime: RuntimeState,
+    metrics: { cellW: number; levelH: number; originX: number; originY: number }): void {
+    const state = runtime.state;
+    const sectionY = getSiteSectionSurfaceY(state);
+    const roofTop = metrics.originY - 14;
+    ctx.save();
+    for (const room of state.surfaceRooms) {
+      if (!isSurfaceRoomOnUndergroundSection(state, room)) continue;
+      const left = surfaceXToUndergroundX(state, room.x);
+      const right = surfaceXToUndergroundX(state, room.x + room.width);
+      const visibleLeft = Math.max(0, left);
+      const visibleRight = Math.min(state.undergroundWidth, right);
+      if (visibleRight <= visibleLeft) continue;
+      const x = metrics.originX + visibleLeft * metrics.cellW;
+      const w = (visibleRight - visibleLeft) * metrics.cellW;
+      const active = state.selectedType === "underground-room" && state.undergroundRooms.some((u) =>
+        u.id === state.selectedId && getSurfaceRoomAboveUnderground(state, u)?.id === room.id);
+      ctx.fillStyle = active ? "#ffe4a5" : SURFACE_COLORS[room.type];
+      ctx.fillRect(x + 1, roofTop, Math.max(1, w - 2), 10);
+      ctx.strokeStyle = "rgba(255,255,255,.5)";
+      ctx.strokeRect(x + 1, roofTop, Math.max(1, w - 2), 10);
+    }
+    for (const portal of getUndergroundPortals(state)) {
+      const x = metrics.originX + (portal.shaft.x + portal.shaft.width / 2) * metrics.cellW;
+      ctx.strokeStyle = "#b3f1dd";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([2, 2]);
+      ctx.beginPath(); ctx.moveTo(x, roofTop); ctx.lineTo(x, metrics.originY + 8); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(237,236,216,.82)";
+    ctx.font = "9px system-ui";
+    ctx.textAlign = "left";
+    if (metrics.originX > 80) ctx.fillText("BÂTIMENT", metrics.originX - 67, roofTop + 8);
+    ctx.restore();
+    // Le sous-sol n'ayant pas de Y, cette bande expose honnêtement la coupe
+    // A-A de la surface au lieu de fabriquer des bâtiments imaginaires.
+    void sectionY;
   }
 
   function drawUndergroundRoom(ctx: CanvasRenderingContext2D, runtime: RuntimeState, room: UndergroundRoom, metrics: { cellW: number; levelH: number; originX: number; originY: number }): void {
@@ -792,7 +933,17 @@ namespace SCPGame {
   export function selectAtCanvas(runtime: RuntimeState, clientX: number, clientY: number): void {
     const state = runtime.state;
     if (state.view === "region") {
-      selectAtGridCell(runtime, screenToRegionCell(runtime, clientX, clientY));
+      const rect = runtime.canvas.getBoundingClientRect();
+      const metrics = regionMetrics(runtime, rect.width);
+      const dx = (clientX - rect.left - metrics.originX) / (metrics.tileW * 0.5);
+      const dy = (clientY - rect.top - metrics.originY) / (metrics.tileH * 0.5);
+      const linked = getSurfaceRoomAtRegionPosition(state, { x: (dx + dy) / 2, y: (dy - dx) / 2 });
+      if (linked) {
+        state.selectedId = linked.id;
+        state.selectedType = "surface-room";
+      } else {
+        selectAtGridCell(runtime, screenToRegionCell(runtime, clientX, clientY));
+      }
     } else if (state.view === "surface") {
       selectAtGridCell(runtime, screenToSurfaceCell(runtime, clientX, clientY));
     } else if (state.view === "underground") {
@@ -807,9 +958,10 @@ namespace SCPGame {
   export function selectAtGridCell(runtime: RuntimeState, cell: Point): void {
     const state = runtime.state;
     if (state.view === "region") {
-      const facility = [...state.regionFacilities].reverse().find((entry) => pointInRect(cell, entry.x, entry.y, entry.width, entry.height));
-      state.selectedId = facility?.id;
-      state.selectedType = facility ? "facility" : undefined;
+      const linked = getSurfaceRoomAtRegionPosition(state, { x: cell.x + 0.5, y: cell.y + 0.5 });
+      const facility = !linked ? [...state.regionFacilities].reverse().find((entry) => pointInRect(cell, entry.x, entry.y, entry.width, entry.height)) : undefined;
+      state.selectedId = linked?.id ?? facility?.id;
+      state.selectedType = linked ? "surface-room" : facility ? "facility" : undefined;
     } else if (state.view === "surface") {
       const room = [...state.surfaceRooms].reverse().find((entry) => pointInRect(cell, entry.x, entry.y, entry.width, entry.height));
       if (room) {

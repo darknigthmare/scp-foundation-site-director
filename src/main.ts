@@ -245,10 +245,12 @@ namespace SCPGame {
 
   function handleCanvasActivation(runtime: RuntimeState, clientX: number, clientY: number): void {
     const cell = hoverCellForView(runtime, clientX, clientY);
-    if (cell) {
+    if (cell && runtime.state.buildSelection) {
       handleGridCellActivation(runtime, cell);
       return;
     }
+    // A roof occupies a fractional isometric region tile. Using only the
+    // floored grid coordinate selects the wrong interior room.
     selectAtCanvas(runtime, clientX, clientY);
   }
 

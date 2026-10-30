@@ -86,17 +86,16 @@ namespace SCPGame {
     shaft: UndergroundRoom;
   }
 
-  // A surface elevator serves a shaft only if their horizontal footprints are
-  // locally aligned; multiple shafts/elevators are supported without global teleportation.
+  // Only the aligned elevator footprint on the same longitudinal section
+  // reaches the shaft: no connections between unrelated buildings.
   export function getUndergroundPortals(state: GameState): UndergroundPortal[] {
     const elevators = state.surfaceRooms.filter((room) => room.type === "elevator" && room.enabled && room.condition > 15);
     const shafts = state.undergroundRooms.filter((room) =>
       room.type === "elevator-shaft" && room.level === 0 && canStaffEnterUndergroundRoom(room));
     const portals: UndergroundPortal[] = [];
     for (const elevator of elevators) {
-      const center = elevator.x + elevator.width / 2;
       for (const shaft of shafts) {
-        if (Math.abs(center - undergroundRoomCenter(shaft).x) <= 5) {
+        if (isShaftUnderSurfaceElevator(state, shaft, elevator)) {
           portals.push({ elevator, shaft });
         }
       }

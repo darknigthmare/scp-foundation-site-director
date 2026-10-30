@@ -218,6 +218,25 @@ namespace SCPGame {
   }
 
   function renderRegionPanel(state: GameState): string {
+    const linkedRoom = state.selectedType === "surface-room"
+      ? state.surfaceRooms.find((room) => room.id === state.selectedId) : undefined;
+    if (linkedRoom) {
+      const definition = getSurfaceDefinition(linkedRoom.type);
+      const roof = getSurfaceRegionFootprint(state, linkedRoom);
+      return `
+        ${renderSelectionHeader(definition.icon, definition.name, "Toiture du bâtiment principal")}
+        <p class="muted">C'est la même salle que dans le plan intérieur. Chaque modification de la Surface actualise ce volume extérieur.</p>
+        ${renderMetricGrid([
+          ["Repère extérieur X", roof.x.toFixed(2)],
+          ["Repère extérieur Y", roof.y.toFixed(2)],
+          ["Emprise", `${linkedRoom.width} × ${linkedRoom.height} cases`],
+          ["État", percent(linkedRoom.condition)]
+        ])}
+        <button class="wide-button" data-view="surface">Entrer dans ce bâtiment</button>
+        ${isSurfaceRoomOnUndergroundSection(state, linkedRoom) ? `<button class="wide-button" data-view="underground">Voir sa coupe souterraine</button>` : ""}
+        <hr>${renderBuildCatalog(state, "region")}
+      `;
+    }
     const selected = state.selectedType === "facility" ? state.regionFacilities.find((entry) => entry.id === state.selectedId) : undefined;
     if (selected) {
       const definition = getRegionDefinition(selected.type);
@@ -237,7 +256,13 @@ namespace SCPGame {
     }
     return `
       ${renderReputationOverview(state)}
-      <p class="hint">Sélectionnez une installation pour consulter son état, ou choisissez une construction puis cliquez sur la carte.</p>
+      <section class="summary-card"><h3>Site principal — vue extérieure</h3>
+        <p>Les toitures visibles au sud-est sont générées depuis les ${state.surfaceRooms.filter((room) => room.type !== "corridor").length} salles réellement construites dans le même complexe.</p>
+        <button class="wide-button" data-view="surface">Entrer dans le bâtiment principal</button>
+        <p class="hint">Les autres installations régionales sont des annexes extérieures. La zone du bâtiment principal est réservée.</p>
+        ${getRegionCampusOverlap(state).length ? `<p class="staff-route-status">Ancienne sauvegarde : ${getRegionCampusOverlap(state).length} annexe(s) chevauchent l'emprise. Rien n'a été déplacé ni effacé.</p>` : ""}
+      </section>
+      <p class="hint">Sélectionnez une toiture du Site ou une annexe régionale sur la carte.</p>
       ${renderBuildCatalog(state, "region")}
     `;
   }
@@ -265,6 +290,9 @@ namespace SCPGame {
           ["Personnel", String(selected.staffAssigned.length)]
         ])}
         ${renderAssignedStaff(state, selected.staffAssigned)}
+        <p class="hint">Cette salle possède la même emprise dans la vue Région, à une autre échelle.</p>
+        <button class="wide-button" data-view="region">Voir ce bâtiment dans la ville</button>
+        ${isSurfaceRoomOnUndergroundSection(state, selected) ? `<button class="wide-button" data-view="underground">Voir le sous-sol à cet aplomb</button>` : `<p class="hint">Hors de l'axe de coupe A-A : aucune projection souterraine directe n'est modélisée à cette latitude.</p>`}
         ${renderSelectionActions()}
         ${renderSurfaceAccessPanel(state, selected)}
         <hr>
@@ -282,6 +310,11 @@ namespace SCPGame {
           ["Moral", percent(state.reputation.personnel)],
           ["Blessés", String(state.staff.filter((member) => member.status === "injured").length)]
         ])}
+      </section>
+      <section class="summary-card"><h3>Intérieur du bâtiment principal</h3>
+        <p>Plan au sol des salles représentées en toiture sur la vue Région. Le trait jaune A-A correspond à la coupe du sous-sol.</p>
+        <button class="wide-button" data-view="region">Voir les toitures depuis la ville</button>
+        <button class="wide-button" data-view="underground">Descendre voir la coupe A-A</button>
       </section>
       <p class="hint">Les salles fonctionnent comme dans un jeu de gestion hospitalière : capacité, personnel, file, maintenance et trajets influencent directement le Site.</p>
       ${renderBuildCatalog(state, "surface")}
@@ -465,10 +498,15 @@ namespace SCPGame {
           ["Équipe", String(selected.staffAssigned.length)],
           ["Habilitation", `Niveau ${getUndergroundClearanceRequirement(selected)}`],
           ["Ascenseur", hasUndergroundElevatorConnection(state, selected) ? "Relié" : "Non relié"],
-          ["Galerie", selected.sealed ? "Scellée" : "Ouverte"]
+          ["Galerie", selected.sealed ? "Scellée" : "Ouverte"],
+          ["À l'aplomb", getSurfaceRoomAboveUnderground(state, selected)
+            ? getSurfaceDefinition(getSurfaceRoomAboveUnderground(state, selected)!.type).name : "Terrain sans pièce"],
+          ["Coupe", `A-A · surface Y=${getSiteSectionSurfaceY(state)}`]
         ])}
         ${scp ? renderContainedScpCard(state, scp) : renderCompatibleTransfers(state, selected)}
         ${renderSelectionActions()}
+        <button class="wide-button" data-view="surface">Voir la salle ou le terrain au-dessus</button>
+        <button class="wide-button" data-view="region">Voir la position dans la ville</button>
         <button class="wide-button" data-action="toggle-underground-seal" data-room="${escapeHtml(selected.id)}">${selected.sealed ? "Rouvrir le secteur" : "Sceller le secteur"}</button>
         <hr>
         ${renderBuildCatalog(state, "underground")}
@@ -476,7 +514,7 @@ namespace SCPGame {
     }
     return `
       <section class="summary-card">
-        <h3>Confinement profond</h3>
+        <h3>Coupe A-A — sous le bâtiment principal</h3>
         ${renderMetricGrid([
           ["SCP confinés", String(state.scps.filter((scp) => scp.contained).length)],
           ["Cellules libres", String(state.undergroundRooms.filter((room) => !room.scpId && getUndergroundDefinition(room.type).containment >= 4).length)],
@@ -484,6 +522,8 @@ namespace SCPGame {
           ["Risque max", percent(Math.max(0, ...state.scps.filter((scp) => scp.contained).map((scp) => scp.breachRisk)))]
         ])}
       </section>
+      <p class="hint">La bande colorée au-dessus du niveau -1 montre les pièces réelles de la surface sur la coupe A-A. Seuls les puits sous un ascenseur du même axe permettent une descente.</p>
+      <button class="wide-button" data-view="surface">Voir le plan intérieur au-dessus</button>
       ${renderUncontainedScps(state)}
       ${renderBuildCatalog(state, "underground")}
     `;

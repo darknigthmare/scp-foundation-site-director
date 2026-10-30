@@ -449,10 +449,25 @@ namespace SCPGame {
   }
 
   export function setView(state: GameState, view: ViewMode): void {
+    const previousView = state.view;
+    const selectedSurface = state.selectedType === "surface-room"
+      ? state.surfaceRooms.find((room) => room.id === state.selectedId) : undefined;
+    const selectedUnderground = state.selectedType === "underground-room"
+      ? state.undergroundRooms.find((room) => room.id === state.selectedId) : undefined;
     state.view = view;
     state.buildSelection = undefined;
-    state.selectedId = undefined;
-    state.selectedType = undefined;
+    if (view === "region" || view === "surface") {
+      const linked = selectedSurface || (selectedUnderground && getSurfaceRoomAboveUnderground(state, selectedUnderground));
+      state.selectedId = linked?.id;
+      state.selectedType = linked ? "surface-room" : undefined;
+    } else if (view === "underground") {
+      const linked = selectedUnderground || (selectedSurface && getUndergroundRoomBelowSurface(state, selectedSurface));
+      state.selectedId = linked?.id;
+      state.selectedType = linked ? "underground-room" : undefined;
+    } else if (view !== previousView) {
+      state.selectedId = undefined;
+      state.selectedType = undefined;
+    }
   }
 
   export function setSpeed(state: GameState, speed: GameSpeed): void {
@@ -480,6 +495,9 @@ namespace SCPGame {
     if (!isRegionDefinitionUnlocked(state, definition)) return { ok: false, message: "Installation non autorisée à ce stade." };
     if (x < 0 || y < 0 || x + definition.size.x > state.regionWidth || y + definition.size.y > state.regionHeight) return { ok: false, message: "Construction hors de la carte." };
     const candidate = { x, y, width: definition.size.x, height: definition.size.y };
+    if (rectanglesOverlap(candidate, getSiteRegionFootprint(state))) {
+      return { ok: false, message: "Terrain du bâtiment principal : aménagez-le depuis la vue Surface." };
+    }
     if (state.regionFacilities.some((facility) => rectanglesOverlap(candidate, facility))) return { ok: false, message: "La zone est déjà occupée." };
     if (!payCost(state.resources, definition.cost)) return { ok: false, message: "Ressources insuffisantes." };
     const facility = createFacility(type, x, y);
