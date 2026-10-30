@@ -90,3 +90,26 @@ Recorded execution evidence: [routing/save/mobile QA](qa/2026-10-29/ROUTING_SAVE
   import/reload/resume and the mobile editor in addition to earlier scenarios.
 - CI produces `scp-operations-package` only after a passing browser run. The ZIP
   includes the tested dist, cumulative source, screenshots and SHA-256 metadata.
+
+
+## 30 octobre 2026 — itinéraires souterrains validés
+
+Suite concrète des guides game-ai, save-systems et QA : la navigation profonde
+ne traverse plus la roche. `src/underground-navigation.ts` calcule les itinéraires
+par modules adjacents et puits alignés ; il vérifie modules scellés, état,
+habilitations et disponibilité des ascenseurs. Le retour à la surface est un
+trajet réel, pas une téléportation. Les déplacements verticaux de quatre
+minutes sont suspendus en l'absence d'électricité, et leur progression
+est conservée dans le format de sauvegarde existant.
+
+L'auto-affectation donne priorité aux équipes de confinement SCP afin que les
+services de surface ne récupèrent pas ces spécialistes pendant une
+normalisation de sauvegarde. Une équipe encore en transit ne participe plus
+à la conformité SCP. Les chemins physiques sont recalculés en cours de jeu
+en cas de fermeture et d'ouverture de secteur.
+
+Exécution GitHub Actions [41031043683](https://github.com/darknigthmare/scp-foundation-site-director/actions/runs/41031043683) :
+92 tests métier, 17 étapes Chromium, zéro message navigateur ; archive complète
+et captures générées. La CI est maintenant fixée sur Ubuntu 24.04, car
+Playwright 1.56 refuse les dépendances Chromium sous Ubuntu 26.04.
+Voir [le rapport QA](qa/2026-10-30/UNDERGROUND_NETWORK.md).

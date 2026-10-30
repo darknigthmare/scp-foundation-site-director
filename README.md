@@ -1,6 +1,6 @@
 # SCP Foundation: Site Director — Deep Protocol
 
-**Base 1.0.0 — build jouable hors ligne, tranche Operations : accès de surface**  
+**Base 1.0.0 — build jouable hors ligne, tranche Operations : accès et transit souterrain**  
 City-builder régional, gestion opérationnelle du complexe de surface, confinement vertical souterrain et commandement tactique de crise.
 
 ![Gestion du complexe de surface](tests/surface.png)
@@ -41,6 +41,16 @@ Les sas traitent une personne à la fois, dans l'ordre d'arrivée, avec admissio
 Les sauvegardes antérieures reçoivent des portes compatibles sans remplacer leurs salles ni leur personnel. Les réglages d'accès s'appliquent à chaque passage : sécuriser une salle exige de configurer tous ses accès.
 
 Cette tranche conserve la version de base 1.0.0. Le dessin libre des salles, les itinéraires souterrains physiques, les flux autonomes de public/fret/SCP et les autres systèmes de la version Operations complète restent dans la feuille de route.
+
+## Circulation souterraine physique — tranche Operations
+
+Depuis le 30 octobre 2026, les déplacements des agents utilisent les **galeries réellement construites** et non une téléportation. Deux modules au même niveau doivent se toucher pour permettre le passage ; deux puits sont reliés verticalement uniquement s'ils sont alignés sur des niveaux consécutifs. Un module désactivé, dégradé ou scellé coupe la route. Les itinéraires sont recalculés lorsque la topologie ou les autorisations changent.
+
+Le personnel rejoint un **ascenseur accessible en surface**, descend pendant quatre minutes de simulation, puis marche à **0,55 unité de plan par minute** sur la carte souterraine ; une panne électrique suspend le transfert. Plusieurs puits peuvent proposer des itinéraires alternatifs. Les niveaux d'habilitation de la salle de destination **et des modules traversés** sont contrôlés. Pour remonter et rejoindre ses besoins de surface, un agent marche jusqu'à un puits et reprend un trajet vertical temporisé. Un équipier encore en trajet ne contribue pas à la conformité d'un confinement SCP.
+
+Dans la vue **Sous-sol**, sélectionner un module permet de voir son habilitation, son lien vers un ascenseur et l'état de sa galerie, puis de **sceller / rouvrir le secteur**. Le plan montre les raccords physiques utilisables. Les sauvegardes reprennent les déplacements en cours sans modifier leur schéma de compatibilité.
+
+**Validation :** [92 tests métier et 17 scénarios navigateur réussis le 30 octobre 2026](docs/qa/2026-10-30/UNDERGROUND_NETWORK.md). Le jeu reste basé sur la version 1.0.0 ; la version Operations 1.1 complète n'est pas déclarée livrée.
 
 ## Lancement rapide
 

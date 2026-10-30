@@ -8,7 +8,7 @@ Livré : simulation complète 2.5D, 12 SCP, campagne, bac à sable, personnel, r
 
 ## 1.1 — Operations
 
-Tranche appliquée le 29 octobre 2026 sur la base 1.0.0 : éditeur des portes/sas de surface, habilitations et sens de passage, file FIFO et cycle interverrouillé, gestion des pannes et migration des sauvegardes. Les flux simulés concernent les employés ; les trajets souterrains physiques et les visiteurs/convois autonomes restent ouverts. La version complète 1.1 n'est pas déclarée livrée.
+Tranche appliquée le 29 octobre 2026 sur la base 1.0.0 : éditeur des portes/sas de surface, habilitations et sens de passage, file FIFO et cycle interverrouillé, gestion des pannes et migration des sauvegardes. Tranche du 30 octobre 2026 : déplacements physiques du personnel souterrain, galeries adjacentes, ascenseurs temporisés, puits consécutifs, habilitations intermédiaires, scellement et itinéraires alternatifs. Les visiteurs/convois autonomes, l'éditeur de portes souterraines et le réseau 3D multi-branches restent à faire. La version complète 1.1 n'est pas déclarée livrée.
 
 - dessin de salles par glisser-déposer et redimensionnement ;
 - portes, sas et sens de circulation ;
