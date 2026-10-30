@@ -168,6 +168,21 @@ def run():
 
             step("transfert d’un SCP vers une cellule compatible", transfer_scp)
 
+            def underground_network_panel():
+                panel = page.locator("#right-panel")
+                expect(panel).to_contain_text("Habilitation")
+                expect(panel).to_contain_text("Ascenseur")
+                expect(panel).to_contain_text("Galerie")
+                seal = panel.locator('button[data-action="toggle-underground-seal"]')
+                expect(seal).to_be_visible()
+                seal.click()
+                expect(panel).to_contain_text("Scellée")
+                panel.locator('button[data-action="toggle-underground-seal"]').click()
+                expect(panel).to_contain_text("Ouverte")
+                page.screenshot(path=str(OUT / "underground-network.png"), full_page=True)
+            step("habilitation, liaison et scellement du souterrain", underground_network_panel)
+
+
             def management():
                 page.locator('button[data-view="management"]').click()
                 page.wait_for_timeout(200)
