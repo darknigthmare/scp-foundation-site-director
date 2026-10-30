@@ -251,7 +251,7 @@ def run():
             def underground_3d_slices():
                 page.locator('button[data-view="underground"]').first.click()
                 panel = page.locator("#right-panel")
-                expect(panel).to_contain_text("Navigation des coupes souterraines")
+                expect(panel.locator('[aria-label="Navigation des coupes souterraines"]')).to_be_visible()
                 expect(panel).to_contain_text("Plan horizontal")
                 expect(panel).to_contain_text("Coupe souterraine Y=")
                 page.screenshot(path=str(OUT / "underground-3d-slice.png"), full_page=True)
