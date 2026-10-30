@@ -21,6 +21,7 @@
     "src/underground-utilities.ts",
     "src/underground-navigation.ts",
     "src/state.ts",
+    "src/scp-behaviors.ts",
     "src/simulation.ts",
     "src/renderers.ts",
     "src/ui.ts",

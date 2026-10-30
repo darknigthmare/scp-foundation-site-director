@@ -175,6 +175,40 @@ def run():
 
             step("transfert d’un SCP vers une cellule compatible", transfer_scp)
 
+            def scp_individual_response():
+                panel = page.locator("#right-panel")
+                report = panel.locator('details.scp-behavior-panel').first
+                expect(report).to_be_visible()
+                expect(report.locator('summary')).to_contain_text('Comportement et réponse spécifique')
+                expect(report).to_contain_text('Recensement')
+                expect(report).to_contain_text('Électricité')
+                expect(report).to_contain_text('Ventilation')
+                response = report.locator('button[data-action="scp-response"]')
+                expect(response).to_be_enabled()
+                response.click()
+                expect(page.locator('#toast')).to_contain_text('SCP-131')
+                expect(response).to_be_disabled()
+                expect(report).to_contain_text('60 minutes')
+                page.screenshot(path=str(OUT / 'scp-specific-response.png'), full_page=True)
+            step('diagnostic et intervention SCP-131 avec délai réel', scp_individual_response)
+
+            def individual_scp_protocols():
+                panel = page.locator("#right-panel")
+                diagnostics = panel.locator("details.scp-behavior-panel").first
+                expect(diagnostics).to_be_visible()
+                expect(diagnostics.locator("summary")).to_contain_text("Comportement et réponse spécifique")
+                expect(diagnostics).to_contain_text("Recensement")
+                expect(diagnostics).to_contain_text("Électricité")
+                expect(diagnostics).to_contain_text("Ventilation")
+                response = diagnostics.locator('button[data-action="scp-response"]')
+                expect(response).to_be_enabled()
+                response.click()
+                expect(page.locator("#toast")).to_contain_text("SCP-131")
+                expect(response).to_be_disabled()
+                expect(diagnostics).to_contain_text("délai de 60 minutes")
+                page.screenshot(path=str(OUT / "scp-131-individual-response.png"), full_page=True)
+            step("SCP-131 : diagnostic individuel, réponse et délai de réutilisation", individual_scp_protocols)
+
             def underground_network_panel():
                 panel = page.locator("#right-panel")
                 expect(panel).to_contain_text("Habilitation")
