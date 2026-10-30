@@ -147,7 +147,8 @@ namespace SCPGame {
   export function staffIsAtUndergroundRoom(member: StaffMember, room: UndergroundRoom): boolean {
     const point = undergroundRoomCenter(room);
     return member.position.layer === "underground" && (member.position.level ?? member.position.y) === room.level
-      && Math.abs(member.position.x - point.x) < 0.0001;
+      && Math.abs(member.position.x - point.x) < 0.0001
+      && Math.abs((member.position.sectionY ?? 14) - (room.y ?? 14)) < 0.0001;
   }
 
   function undergroundRouteFailure(member: StaffMember): void {
@@ -164,35 +165,74 @@ namespace SCPGame {
     member.position.y = member.position.level ?? member.position.y;
   }
 
-  // Resolve a fresh shortest route per simulation minute. Horizontal movement
-  // is continuous and shaft changes require four uninterrupted powered ticks.
-  // A sealed corridor immediately prevents further movement across it.
+  // A transverse junction advances continuously in the third spatial axis.
+  // Save the junction IDs instead of recomputing a path from a fractional row.
+  function continueUndergroundLink(state: GameState, member: StaffMember): void {
+    const link = member.undergroundLink;
+    if (!link || member.position.layer !== "underground") return;
+    const from = state.undergroundRooms.find((room) => room.id === link.fromId);
+    const to = state.undergroundRooms.find((room) => room.id === link.toId);
+    const fromOpen = Boolean(from && canStaffEnterUndergroundRoom(from, member));
+    const toOpen = Boolean(to && canStaffEnterUndergroundRoom(to, member));
+    if (!fromOpen && !toOpen) {
+      member.routeBlockedReason = "Jonction inter-coupes isolée des deux côtés";
+      member.status = "queued";
+      return;
+    }
+    const allowed = Boolean(fromOpen && toOpen && from && to && areUndergroundRoomsConnected(from, to, state));
+    // A sector closed mid-crossing sends the member back along the same
+    // junction at normal walking speed, never instantaneously through rock.
+    const endpoint = allowed || !fromOpen ? to : from;
+    if (!endpoint) {
+      member.routeBlockedReason = "Coupe adjacente indisponible";
+      member.status = "queued";
+      return;
+    }
+    const goal = undergroundRoomSectionY(state, endpoint);
+    const here = member.position.sectionY ?? getLegacyUndergroundSectionY(state);
+    const remaining = goal - here;
+    member.position.sectionY = here + Math.sign(remaining) * Math.min(Math.abs(remaining), UNDERGROUND_MOVE_SPEED);
+    member.position.x = link.crossingX;
+    member.position.y = endpoint.level;
+    undergroundTransitStatus(member);
+    member.routeBlockedReason = allowed ? undefined : "Secteur fermé : retour à la coupe précédente";
+    if (Math.abs(member.position.sectionY - goal) < 0.0001) {
+      member.position.sectionY = goal;
+      member.undergroundLink = undefined;
+    }
+  }
+
+  // Follow x/sectionY/depth edges explicitly. Horizontal corridors share a
+  // wall, transverse corridors share an x interval and vertical ones share
+  // the same shaft footprint at consecutive depths.
   function advanceUndergroundWalk(state: GameState, member: StaffMember,
     destination: UndergroundRoom, intentId = destination.id): boolean {
+    if (member.undergroundLink) { continueUndergroundLink(state, member); return false; }
     const route = planUndergroundRoute(state, member.position, destination, member);
     if (!route) { undergroundRouteFailure(member); return false; }
     member.routeBlockedReason = undefined;
     const origin = route[0];
     const next = route[1] ?? origin;
-    const nextPoint = undergroundRoomCenter(next);
-    const originPoint = undergroundRoomCenter(origin);
-    const nextTarget: LayerPoint = { layer: "underground", ...nextPoint, level: next.level };
+    const nextPoint = undergroundRoomPosition(state, next);
+    const originPoint = undergroundRoomPosition(state, origin);
     const wasTarget = member.target?.layer === "underground" && member.targetRoomId === intentId
-      && member.target.x === nextPoint.x && member.target.level === next.level;
+      && member.target.x === nextPoint.x && member.target.level === next.level
+      && member.target.sectionY === nextPoint.sectionY;
     undergroundTransitStatus(member);
     member.path = route.slice(1).map(undergroundRoomCenter);
     member.pathIndex = 0;
+    member.position.sectionY ??= getLegacyUndergroundSectionY(state);
 
     if (next.level !== (member.position.level ?? member.position.y)) {
       if (Math.abs(member.position.x - originPoint.x) > 0.0001) {
-        member.target = { layer: "underground", ...originPoint, level: origin.level };
+        member.target = originPoint;
         member.targetRoomId = intentId;
         member.taskProgress = 0;
         moveUndergroundX(member, originPoint.x);
         return false;
       }
       if (!wasTarget) member.taskProgress = 0;
-      member.target = nextTarget;
+      member.target = nextPoint;
       member.targetRoomId = intentId;
       if (!undergroundPowerAvailable(state)) {
         member.routeBlockedReason = "Ascenseur en attente d'alimentation";
@@ -200,14 +240,37 @@ namespace SCPGame {
       }
       member.taskProgress = Math.min(100, member.taskProgress + 100 / VERTICAL_TRANSFER_MINUTES);
       if (member.taskProgress < 100) return false;
-      member.position = { layer: "underground", ...nextPoint, level: next.level };
+      member.position = { ...nextPoint };
       member.taskProgress = 0;
       return false;
     }
 
-    // A person already in the destination does not reset work progress.
+    const originY = undergroundRoomSectionY(state, origin);
+    const nextY = undergroundRoomSectionY(state, next);
+    if (originY !== nextY) {
+      const left = Math.max(origin.x, next.x);
+      const right = Math.min(origin.x + origin.width, next.x + next.width);
+      // Keep the crossing inside the shared opening. The midpoint gives a
+      // deterministic portal when re-routing a staffed, saved installation.
+      const crossingX = (left + right) / 2;
+      if (Math.abs(member.position.x - crossingX) > 0.0001) {
+        member.target = { ...originPoint, x: crossingX };
+        member.targetRoomId = intentId;
+        member.taskProgress = 0;
+        moveUndergroundX(member, crossingX);
+        return false;
+      }
+      member.undergroundLink = { fromId: origin.id, toId: next.id, crossingX };
+      member.target = { ...nextPoint, x: crossingX };
+      member.targetRoomId = intentId;
+      member.taskProgress = 0;
+      continueUndergroundLink(state, member);
+      return false;
+    }
+
+    // A member already at a cell does not reset accumulated experience.
     if (staffIsAtUndergroundRoom(member, destination)) {
-      member.target = { layer: "underground", ...undergroundRoomCenter(destination), level: destination.level };
+      member.target = undergroundRoomPosition(state, destination);
       member.targetRoomId = intentId;
       member.path = [];
       member.pathIndex = 0;
@@ -215,7 +278,7 @@ namespace SCPGame {
       return true;
     }
     member.taskProgress = 0;
-    member.target = nextTarget;
+    member.target = nextPoint;
     member.targetRoomId = intentId;
     moveUndergroundX(member, nextPoint.x);
     if (!staffIsAtUndergroundRoom(member, destination)) return false;
@@ -231,12 +294,13 @@ namespace SCPGame {
     let best = Infinity;
     for (const portal of getUndergroundPortals(state)) {
       const below = planUndergroundRoute(state,
-        { layer: "underground", ...undergroundRoomCenter(portal.shaft), level: 0 }, destination, member);
+        undergroundRoomPosition(state, portal.shaft), destination, member);
       if (!below) continue;
       const above = planSurfaceRoute(state, member.position, portal.elevator, member);
       if (above === undefined) continue;
       const distance = above.length + below.length * 2
-        + Math.abs(undergroundRoomCenter(destination).x - undergroundRoomCenter(portal.shaft).x) / 2;
+        + Math.abs(undergroundRoomCenter(destination).x - undergroundRoomCenter(portal.shaft).x) / 2
+        + Math.abs(undergroundRoomSectionY(state, destination) - undergroundRoomSectionY(state, portal.shaft)) * 3;
       if (distance < best) { best = distance; selected = portal; }
     }
     return selected;
@@ -255,9 +319,10 @@ namespace SCPGame {
     }
     const portal = getUndergroundPortals(state).find(({ elevator, shaft }) =>
       Math.abs(undergroundRoomCenter(shaft).x - target.x) < 0.0001
+      && (target.sectionY ?? getLegacyUndergroundSectionY(state)) === undergroundRoomSectionY(state, shaft)
       && pointInRect(member.position, elevator.x, elevator.y, elevator.width, elevator.height));
     if (!portal || !planUndergroundRoute(state,
-      { layer: "underground", ...undergroundRoomCenter(portal.shaft), level: 0 }, destination, member)) {
+      undergroundRoomPosition(state, portal.shaft), destination, member)) {
       member.routeBlockedReason = "Ascenseur ou réseau profond indisponible";
       undergroundTransitStatus(member);
       return;
@@ -270,7 +335,7 @@ namespace SCPGame {
     member.routeBlockedReason = undefined;
     member.taskProgress = Math.min(100, member.taskProgress + 100 / VERTICAL_TRANSFER_MINUTES);
     if (member.taskProgress < 100) return;
-    member.position = { layer: "underground", ...undergroundRoomCenter(portal.shaft), level: 0 };
+    member.position = undergroundRoomPosition(state, portal.shaft);
     member.taskProgress = 0;
     clearStaffRoute(member);
   }
@@ -285,7 +350,9 @@ namespace SCPGame {
       // Preserve the selected return lift through a pause or save/load.
       const preferred = portal.elevator.id === member.targetRoomId ? -1000 : 0;
       const score = route.length * 2
-        + Math.abs(member.position.x - undergroundRoomCenter(portal.shaft).x) + preferred;
+        + Math.abs(member.position.x - undergroundRoomCenter(portal.shaft).x)
+        + Math.abs((member.position.sectionY ?? getLegacyUndergroundSectionY(state))
+          - undergroundRoomSectionY(state, portal.shaft)) * 3 + preferred;
       if (score < best) { best = score; selected = portal; }
     }
     return selected;
@@ -511,6 +578,12 @@ namespace SCPGame {
         member.needs.fatigue = clamp(member.needs.fatigue + 0.018, 0, 100);
         return;
       }
+      if (member.position.layer === "underground" && member.undergroundLink) {
+        continueUndergroundLink(state, member);
+        member.needs.hunger = clamp(member.needs.hunger + 0.022, 0, 100);
+        member.needs.fatigue = clamp(member.needs.fatigue + 0.018, 0, 100);
+        return;
+      }
       // An already admitted lift transit finishes before a shift/need change.
       if (member.position.layer === "surface" && member.target?.layer === "underground"
         && state.undergroundRooms.some((room) => room.id === member.targetRoomId)) {
@@ -640,7 +713,7 @@ namespace SCPGame {
       if (desiredRoom && assignedUndergroundRoom && staffHasArrived(member, desiredRoom)) {
         const entry = selectUndergroundEntry(state, member, assignedUndergroundRoom);
         if (entry && entry.elevator.id === desiredRoom.id) {
-          member.target = { layer: "underground", ...undergroundRoomCenter(entry.shaft), level: 0 };
+          member.target = undergroundRoomPosition(state, entry.shaft);
           member.targetRoomId = assignedUndergroundRoom.id;
           member.taskProgress = 0;
           member.path = [];

@@ -261,7 +261,9 @@ namespace SCPGame {
     if (build && build.layer === "region" && state.view === "region") {
       result = buildRegionFacility(state, build.type as RegionFacilityType, cell.x, cell.y);
     } else if (build && build.layer === "surface" && state.view === "surface") {
-      result = buildSurfaceRoom(state, build.type as SurfaceRoomType, cell.x, cell.y);
+      result = getActiveInteriorFacility(state)
+        ? { ok: false, message: "Cette annexe dispose d'un plan d'inspection. Retournez au Site principal pour construire." }
+        : buildSurfaceRoom(state, build.type as SurfaceRoomType, cell.x, cell.y);
     } else if (build && build.layer === "underground" && state.view === "underground") {
       result = buildUndergroundRoom(state, build.type as UndergroundRoomType, cell.x, cell.y);
     } else {

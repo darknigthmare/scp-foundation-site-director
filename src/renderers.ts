@@ -343,6 +343,11 @@ namespace SCPGame {
   function drawSurface(runtime: RuntimeState, width: number, height: number): void {
     const state = runtime.state;
     const ctx = runtime.context;
+    const annex = getActiveInteriorFacility(state);
+    if (annex) {
+      drawAnnexInterior(runtime, annex, width, height);
+      return;
+    }
     const metrics = surfaceMetrics(runtime, width, height);
     const totalW = state.surfaceWidth * metrics.cell;
     const totalH = state.surfaceHeight * metrics.cell;
@@ -392,6 +397,65 @@ namespace SCPGame {
     ]);
   }
 
+  function drawAnnexInterior(runtime: RuntimeState, facility: RegionFacility, width: number, height: number): void {
+    const state = runtime.state;
+    const ctx = runtime.context;
+    const plan = getAnnexInteriorPlan(state, facility);
+    if (!plan) return;
+    const metrics = surfaceMetrics(runtime, width, height);
+    const palette: Record<AnnexInteriorRoom["category"], string> = {
+      operations: "#2d646b", control: "#395e86", support: "#665d49", entry: "#43685a"
+    };
+    const cell = metrics.cell;
+    const px = metrics.originX + plan.footprint.x * cell;
+    const py = metrics.originY + plan.footprint.y * cell;
+    const pw = plan.footprint.width * cell;
+    const ph = plan.footprint.height * cell;
+    ctx.fillStyle = "#18232a";
+    ctx.fillRect(px - 12, py - 12, pw + 24, ph + 24);
+    ctx.strokeStyle = "#b9d4cf";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px - 2, py - 2, pw + 4, ph + 4);
+    for (const zone of plan.rooms) {
+      const x = metrics.originX + zone.x * cell;
+      const y = metrics.originY + zone.y * cell;
+      const w = zone.width * cell;
+      const h = zone.height * cell;
+      const selected = state.flags["annex-room-selected"] === zone.id;
+      ctx.fillStyle = facility.enabled ? palette[zone.category] : "#3c4346";
+      ctx.fillRect(x + 2, y + 2, w - 4, h - 4);
+      ctx.fillStyle = "rgba(255,255,255,.065)";
+      for (let step = 0; step < 3; step += 1) {
+        const slot = w * (0.23 + step * 0.25);
+        ctx.fillRect(x + slot - 4, y + h * 0.25, 8, Math.max(4, h * 0.12));
+      }
+      ctx.strokeStyle = selected ? "#ffde99" : "rgba(222,242,237,.57)";
+      ctx.lineWidth = selected ? 3 : 1.5;
+      ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#f4f8f6";
+      ctx.font = "700 10px system-ui";
+      const parts = zone.name.split(" ");
+      const mid = Math.ceil(parts.length / 2);
+      ctx.fillText(parts.slice(0, mid).join(" ").slice(0, 25), x + w / 2, y + h / 2 - 4);
+      ctx.fillText(parts.slice(mid).join(" ").slice(0, 25), x + w / 2, y + h / 2 + 10);
+    }
+    ctx.textAlign = "left";
+    // The schematic's global volume is linked to the actual regional object;
+    // these four zones are explanatory, not extra production or employee slots.
+    ctx.fillStyle = "rgba(14,22,26,.92)";
+    ctx.fillRect(px, py - 34, pw, 24);
+    ctx.fillStyle = "#c9ede3";
+    ctx.font = "700 12px system-ui";
+    ctx.fillText(`ANNEXE ${facility.id.slice(-6).toUpperCase()} · NIV. ${facility.level}`, px + 7, py - 18);
+    drawCanvasTitle(ctx, "INTÉRIEUR DE L'ANNEXE", `${plan.buildingName} · bâtiment de la Région · état ${Math.round(facility.condition)} %`, width);
+    drawLegend(ctx, width, height, [
+      ["Zones", plan.rooms.length, "#7bcab5"],
+      ["État", Math.round(facility.condition), facility.condition < 45 ? "#e36e68" : "#73c9a3"],
+      ["Niveau", facility.level, "#9ab7cf"]
+    ]);
+  }
+
   function drawSiteSurfaceSection(ctx: CanvasRenderingContext2D, runtime: RuntimeState,
     metrics: { cell: number; originX: number; originY: number }): void {
     const state = runtime.state;
@@ -408,7 +472,8 @@ namespace SCPGame {
     ctx.fillRect(metrics.originX + 4, y - 21, 118, 16);
     ctx.fillStyle = "#ffdda0";
     ctx.font = "700 10px system-ui";
-    ctx.fillText("COUPE SOUS-SOL A-A", metrics.originX + 9, y - 9);
+    ctx.fillText(`COUPE Y=${getSiteSectionSurfaceY(state)} · ${getSiteSectionSurfaceY(state) + 1}/${state.surfaceHeight}`,
+      metrics.originX + 9, y - 9);
     for (const portal of getUndergroundPortals(state)) {
       const center = undergroundXToSurfaceX(state, portal.shaft.x + portal.shaft.width / 2);
       const x = metrics.originX + center * metrics.cell;
@@ -640,13 +705,16 @@ namespace SCPGame {
     }
 
     drawUndergroundSurfaceStrip(ctx, runtime, metrics);
-    state.undergroundRooms.forEach((room) => drawUndergroundRoom(ctx, runtime, room, metrics));
-    // Draw only physical junctions, never imaginary shortcuts through rock.
-    const accessible = state.undergroundRooms.filter((room) => canStaffEnterUndergroundRoom(room));
+    const cut = getSiteSectionSurfaceY(state);
+    const visibleRooms = state.undergroundRooms.filter((room) => undergroundRoomSectionY(state, room) === cut);
+    visibleRooms.forEach((room) => drawUndergroundRoom(ctx, runtime, room, metrics));
+    // Junctions across the current cut are visible; neighbouring transverse
+    // links have directional markers, not fictitious on-screen corridors.
+    const accessible = visibleRooms.filter((room) => canStaffEnterUndergroundRoom(room));
     for (let i = 0; i < accessible.length; i += 1) {
       for (let j = i + 1; j < accessible.length; j += 1) {
         const a = accessible[i], b = accessible[j];
-        if (!areUndergroundRoomsConnected(a, b)) continue;
+        if (!areUndergroundRoomsConnected(a, b, state)) continue;
         if (a.level === b.level) {
           const boundary = a.x + a.width === b.x ? b.x : a.x;
           ctx.fillStyle = "rgba(129,226,193,.85)";
@@ -664,7 +732,23 @@ namespace SCPGame {
         }
       }
     }
+    // Report transverse exits on this cut so a player can trace branches.
+    for (const room of accessible) {
+      for (const other of state.undergroundRooms) {
+        if (other === room || undergroundRoomSectionY(state, other) === cut
+          || !areUndergroundRoomsConnected(room, other, state)) continue;
+        const midpoint = (Math.max(room.x, other.x)
+          + Math.min(room.x + room.width, other.x + other.width)) / 2;
+        const x = metrics.originX + midpoint * metrics.cellW;
+        const y = metrics.originY + room.level * metrics.levelH
+          + (undergroundRoomSectionY(state, other) > cut ? metrics.levelH * 0.83 : metrics.levelH * 0.17);
+        ctx.fillStyle = "#bee6cf";
+        ctx.font = "700 14px system-ui";
+        ctx.fillText(undergroundRoomSectionY(state, other) > cut ? "↓" : "↑", x - 5, y);
+      }
+    }
     drawUndergroundStaff(ctx, runtime, metrics);
+    drawUndergroundPlanInset(runtime, width);
 
     if (runtime.hoveredCell) {
       const hover = runtime.hoveredCell;
@@ -678,7 +762,8 @@ namespace SCPGame {
       ctx.strokeRect(metrics.originX + hover.x * metrics.cellW, metrics.originY + hover.y * metrics.levelH + 4, roomWidth * metrics.cellW, metrics.levelH - 10);
     }
 
-    drawCanvasTitle(ctx, "SOUS LE MÊME SITE", "Coupe A-A sous les bâtiments de surface · puits à l'aplomb des ascenseurs", width);
+    drawCanvasTitle(ctx, "RÉSEAU SOUTERRAIN 3 AXES",
+      `Coupe Y=${getSiteSectionSurfaceY(state)} · ${visibleRooms.length} modules ici · jonctions X/Y et puits profondeur`, width);
     const contained = state.scps.filter((scp) => scp.contained).length;
     const maxRisk = Math.max(0, ...state.scps.filter((scp) => scp.contained).map((scp) => scp.breachRisk));
     drawLegend(ctx, width, height, [
@@ -686,6 +771,71 @@ namespace SCPGame {
       ["SCP confinés", contained, "#73c9a3"],
       ["Risque max", Math.round(maxRisk), maxRisk > 70 ? "#e36e68" : "#d5bd6a"]
     ]);
+  }
+
+  function undergroundMinimapBounds(runtime: RuntimeState, width: number): SiteRectangle | undefined {
+    if (width < 780) return undefined;
+    return { x: width - 238, y: 66, width: 218, height: 150 };
+  }
+
+  /** Overview of all transverse cuts at a chosen depth, using the SAME rooms. */
+  function drawUndergroundPlanInset(runtime: RuntimeState, width: number): void {
+    const bounds = undergroundMinimapBounds(runtime, width);
+    if (!bounds) return;
+    const state = runtime.state;
+    const ctx = runtime.context;
+    const level = getUndergroundPlanLevel(state);
+    const padding = 8;
+    const startY = bounds.y + 26;
+    const usableW = bounds.width - padding * 2;
+    const usableH = bounds.height - 34;
+    const stepX = usableW / state.undergroundWidth;
+    const stepY = usableH / state.surfaceHeight;
+    ctx.save();
+    ctx.fillStyle = "rgba(6,17,24,.96)";
+    ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+    ctx.strokeStyle = "rgba(138,195,192,.7)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+    ctx.fillStyle = "#d5efe7";
+    ctx.font = "700 11px system-ui";
+    ctx.fillText(`PLAN HORIZONTAL · NIVEAU -${level + 1}`, bounds.x + 9, bounds.y + 17);
+    for (const room of state.undergroundRooms.filter((entry) => entry.level === level)) {
+      const x = bounds.x + padding + room.x * stepX;
+      const y = startY + undergroundRoomSectionY(state, room) * stepY;
+      const w = room.width * stepX;
+      ctx.fillStyle = room.sealed || !room.enabled ? "#985451" : UNDERGROUND_COLORS[room.type];
+      ctx.fillRect(x + .3, y + .3, Math.max(1, w - .6), Math.max(2, stepY - .6));
+      ctx.strokeStyle = state.selectedId === room.id ? "#fff2b5" : "rgba(230,249,240,.34)";
+      ctx.lineWidth = state.selectedId === room.id ? 2 : 0.6;
+      ctx.strokeRect(x + .3, y + .3, Math.max(1, w - .6), Math.max(2, stepY - .6));
+    }
+    const cut = getSiteSectionSurfaceY(state);
+    ctx.strokeStyle = "#ffdc91";
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(bounds.x + padding, startY + (cut + 0.5) * stepY);
+    ctx.lineTo(bounds.x + padding + usableW, startY + (cut + 0.5) * stepY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  function screenToUndergroundMiniMap(runtime: RuntimeState, clientX: number, clientY: number):
+    { x: number; sectionY: number } | undefined {
+    const rect = runtime.canvas.getBoundingClientRect();
+    const bounds = undergroundMinimapBounds(runtime, rect.width);
+    if (!bounds) return undefined;
+    const px = clientX - rect.left;
+    const py = clientY - rect.top;
+    const padding = 8;
+    const fromY = bounds.y + 26;
+    if (px < bounds.x + padding || px >= bounds.x + bounds.width - padding
+      || py < fromY || py >= bounds.y + bounds.height - 8) return undefined;
+    const x = Math.floor((px - bounds.x - padding) * runtime.state.undergroundWidth / (bounds.width - 2 * padding));
+    const sectionY = Math.floor((py - fromY) * runtime.state.surfaceHeight / (bounds.height - 34));
+    return { x, sectionY };
   }
 
   function drawUndergroundSurfaceStrip(ctx: CanvasRenderingContext2D, runtime: RuntimeState,
@@ -710,7 +860,8 @@ namespace SCPGame {
       ctx.strokeStyle = "rgba(255,255,255,.5)";
       ctx.strokeRect(x + 1, roofTop, Math.max(1, w - 2), 10);
     }
-    for (const portal of getUndergroundPortals(state)) {
+    for (const portal of getUndergroundPortals(state).filter((entry) =>
+      undergroundRoomSectionY(state, entry.shaft) === sectionY)) {
       const x = metrics.originX + (portal.shaft.x + portal.shaft.width / 2) * metrics.cellW;
       ctx.strokeStyle = "#b3f1dd";
       ctx.lineWidth = 1.5;
@@ -723,9 +874,8 @@ namespace SCPGame {
     ctx.textAlign = "left";
     if (metrics.originX > 80) ctx.fillText("BÂTIMENT", metrics.originX - 67, roofTop + 8);
     ctx.restore();
-    // Le sous-sol n'ayant pas de Y, cette bande expose honnêtement la coupe
-    // A-A de la surface au lieu de fabriquer des bâtiments imaginaires.
-    void sectionY;
+    // La bande reste une section précise, tandis que les nouvelles galeries
+    // possèdent maintenant une coordonnée transversale et une profondeur réelle.
   }
 
   function drawUndergroundRoom(ctx: CanvasRenderingContext2D, runtime: RuntimeState, room: UndergroundRoom, metrics: { cellW: number; levelH: number; originX: number; originY: number }): void {
@@ -780,7 +930,9 @@ namespace SCPGame {
   }
 
   function drawUndergroundStaff(ctx: CanvasRenderingContext2D, runtime: RuntimeState, metrics: { cellW: number; levelH: number; originX: number; originY: number }): void {
-    runtime.state.staff.filter((member) => member.status !== "dead" && member.position.layer === "underground").forEach((member, index) => {
+    runtime.state.staff.filter((member) => member.status !== "dead" && member.position.layer === "underground"
+      && Math.abs(getStaffUndergroundSectionY(runtime.state, member) - getSiteSectionSurfaceY(runtime.state)) < 0.55)
+      .forEach((member, index) => {
       const level = member.position.level ?? Math.round(member.position.y);
       const x = metrics.originX + (member.position.x + (index % 3) * 0.12) * metrics.cellW;
       const y = metrics.originY + level * metrics.levelH + metrics.levelH * 0.72;
@@ -947,7 +1099,18 @@ namespace SCPGame {
     } else if (state.view === "surface") {
       selectAtGridCell(runtime, screenToSurfaceCell(runtime, clientX, clientY));
     } else if (state.view === "underground") {
-      selectAtGridCell(runtime, screenToUndergroundCell(runtime, clientX, clientY));
+      const minimap = screenToUndergroundMiniMap(runtime, clientX, clientY);
+      if (minimap) {
+        setUndergroundSlice(state, minimap.sectionY);
+        const level = getUndergroundPlanLevel(state);
+        const room = [...state.undergroundRooms].reverse().find((entry) => entry.level === level
+          && undergroundRoomSectionY(state, entry) === minimap.sectionY
+          && minimap.x >= entry.x && minimap.x < entry.x + entry.width);
+        state.selectedId = room?.id;
+        state.selectedType = room ? "underground-room" : undefined;
+      } else {
+        selectAtGridCell(runtime, screenToUndergroundCell(runtime, clientX, clientY));
+      }
     } else if (state.view === "command") {
       const zone = screenToCommandZone(runtime, clientX, clientY);
       state.selectedId = zone?.id;
@@ -963,6 +1126,15 @@ namespace SCPGame {
       state.selectedId = linked?.id ?? facility?.id;
       state.selectedType = linked ? "surface-room" : facility ? "facility" : undefined;
     } else if (state.view === "surface") {
+      const annex = getActiveInteriorFacility(state);
+      if (annex) {
+        const zone = getAnnexInteriorPlan(state, annex)?.rooms.find((entry) =>
+          pointInRect(cell, entry.x, entry.y, entry.width, entry.height));
+        state.flags["annex-room-selected"] = zone?.id ?? "";
+        state.selectedId = annex.id;
+        state.selectedType = "facility";
+        return;
+      }
       const room = [...state.surfaceRooms].reverse().find((entry) => pointInRect(cell, entry.x, entry.y, entry.width, entry.height));
       if (room) {
         state.selectedId = room.id;
@@ -973,7 +1145,9 @@ namespace SCPGame {
         state.selectedType = staff ? "staff" : undefined;
       }
     } else if (state.view === "underground") {
-      const room = [...state.undergroundRooms].reverse().find((entry) => entry.level === cell.y && cell.x >= entry.x && cell.x < entry.x + entry.width);
+      const room = [...state.undergroundRooms].reverse().find((entry) =>
+        entry.level === cell.y && undergroundRoomSectionY(state, entry) === getSiteSectionSurfaceY(state)
+        && cell.x >= entry.x && cell.x < entry.x + entry.width);
       state.selectedId = room?.id;
       state.selectedType = room ? "underground-room" : undefined;
     }

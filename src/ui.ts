@@ -249,6 +249,10 @@ namespace SCPGame {
           ["Couverture", signed(definition.coverImpact ?? 0)],
           ["Suspicion", signed(definition.suspicionImpact ?? 0)]
         ])}
+        ${isRegionFacilityEnterable(selected)
+          ? `<button class="wide-button" data-view="surface">Explorer l'intérieur de cette annexe</button>
+             <p class="hint">Plan intérieur propre à ce bâtiment, lié à son état réel. Les zones sont consultatives et ne génèrent pas de personnel fictif.</p>`
+          : `<p class="hint">Installation extérieure sans pièces closes : vue régionale uniquement.</p>`}
         ${renderSelectionActions()}
         <hr>
         ${renderBuildCatalog(state, "region")}
@@ -268,6 +272,32 @@ namespace SCPGame {
   }
 
   function renderSurfacePanel(state: GameState): string {
+    const annex = getActiveInteriorFacility(state);
+    if (annex) {
+      const plan = getAnnexInteriorPlan(state, annex)!;
+      const selectedZone = plan.rooms.find((zone) => zone.id === state.flags["annex-room-selected"]);
+      const definition = getRegionDefinition(annex.type);
+      return `
+        ${renderSelectionHeader(definition.icon, plan.buildingName, `Annexe régionale · niveau ${annex.level}`)}
+        <p class="muted">Plan intérieur de l'installation extérieure sélectionnée. Les quatre zones sont propres à ce bâtiment et reflètent sa fonction.</p>
+        ${renderMetricGrid([
+          ["État réel", percent(annex.condition)],
+          ["Niveau", String(annex.level)],
+          ["Emprise ville", `${annex.width} × ${annex.height}`],
+          ["Statut", annex.enabled ? "En service" : "Arrêté"]
+        ])}
+        ${selectedZone ? `<section class="summary-card"><h3>${escapeHtml(selectedZone.name)}</h3>
+          <p>${escapeHtml(selectedZone.function)}</p>
+          <p class="hint">Zone d'inspection rattachée à ${escapeHtml(plan.buildingName)}. La production et la sécurité restent gouvernées par l'installation extérieure existante.</p>
+        </section>` : ""}
+        <section class="summary-card"><h3>Pièces de l'annexe</h3>
+          <div class="surface-access-list">${plan.rooms.map((zone) => `<button class="wide-button" data-action="select-annex-zone" data-room="${escapeHtml(zone.id)}" aria-pressed="${selectedZone?.id === zone.id}">${escapeHtml(zone.name)}</button>`).join("")}</div>
+        </section>
+        <button class="wide-button" data-view="region">Revenir au bâtiment dans la ville</button>
+        <button class="wide-button" data-action="open-main-interior">Revenir à l'intérieur du Site principal</button>
+        <p class="hint">Les zones de l'annexe sont inspectables ; leur construction individualisée et le déplacement des agents entre bâtiments seront développés séparément. Aucun service fictif n'est ajouté.</p>
+      `;
+    }
     if (state.selectedType === "staff") {
       const member = state.staff.find((entry) => entry.id === state.selectedId);
       if (member) return `${renderStaffDetails(member)}<hr>${renderBuildCatalog(state, "surface")}`;
@@ -292,7 +322,8 @@ namespace SCPGame {
         ${renderAssignedStaff(state, selected.staffAssigned)}
         <p class="hint">Cette salle possède la même emprise dans la vue Région, à une autre échelle.</p>
         <button class="wide-button" data-view="region">Voir ce bâtiment dans la ville</button>
-        ${isSurfaceRoomOnUndergroundSection(state, selected) ? `<button class="wide-button" data-view="underground">Voir le sous-sol à cet aplomb</button>` : `<p class="hint">Hors de l'axe de coupe A-A : aucune projection souterraine directe n'est modélisée à cette latitude.</p>`}
+        <button class="wide-button" data-view="underground">Voir la coupe sous cette salle</button>
+        <p class="hint">La coupe s'adaptera à l'axe de cette salle. Seuls les modules souterrains réellement construits y apparaîtront.</p>
         ${renderSelectionActions()}
         ${renderSurfaceAccessPanel(state, selected)}
         <hr>
@@ -312,9 +343,9 @@ namespace SCPGame {
         ])}
       </section>
       <section class="summary-card"><h3>Intérieur du bâtiment principal</h3>
-        <p>Plan au sol des salles représentées en toiture sur la vue Région. Le trait jaune A-A correspond à la coupe du sous-sol.</p>
+        <p>Plan au sol des salles représentées en toiture dans la Région. La ligne jaune affiche la coupe souterraine Y=${getSiteSectionSurfaceY(state)}, sélectionnable parmi ${state.surfaceHeight} axes.</p>
         <button class="wide-button" data-view="region">Voir les toitures depuis la ville</button>
-        <button class="wide-button" data-view="underground">Descendre voir la coupe A-A</button>
+        <button class="wide-button" data-view="underground">Explorer les coupes souterraines</button>
       </section>
       <p class="hint">Les salles fonctionnent comme dans un jeu de gestion hospitalière : capacité, personnel, file, maintenance et trajets influencent directement le Site.</p>
       ${renderBuildCatalog(state, "surface")}
@@ -483,13 +514,29 @@ namespace SCPGame {
     refreshUI(activeRuntime, true);
   }
 
+  function renderUndergroundSliceControls(state: GameState): string {
+    const y = getSiteSectionSurfaceY(state);
+    const visible = state.undergroundRooms.filter((room) => undergroundRoomSectionY(state, room) === y).length;
+    const other = state.undergroundRooms.length - visible;
+    return `<section class="summary-card" aria-label="Navigation des coupes souterraines">
+      <div class="catalog-heading"><h3>Coupe souterraine Y=${y}</h3><span>${y + 1} / ${state.surfaceHeight}</span></div>
+      <div class="action-row"><button data-action="underground-slice-prev" ${y <= 0 ? "disabled" : ""}>Coupe précédente</button>
+      <button data-action="underground-slice-next" ${y >= state.surfaceHeight - 1 ? "disabled" : ""}>Coupe suivante</button></div>
+      <div class="catalog-heading"><h3>Plan horizontal</h3><span>Niveau -${getUndergroundPlanLevel(state) + 1}</span></div>
+      <div class="action-row"><button data-action="underground-level-prev" ${getUndergroundPlanLevel(state) <= 0 ? "disabled" : ""}>Niveau au-dessus</button>
+      <button data-action="underground-level-next" ${getUndergroundPlanLevel(state) >= state.undergroundLevels - 1 ? "disabled" : ""}>Niveau inférieur</button></div>
+      <p class="hint">${visible} module(s) ici · ${other} sur d'autres coupes. Les flèches indiquent les traverses physiques entre coupes voisines. Cliquez sur la mini-carte (ordinateur) pour choisir directement une coupe et un module du niveau affiché.</p>
+    </section>`;
+  }
+
   function renderUndergroundPanel(state: GameState): string {
     const selected = state.selectedType === "underground-room" ? state.undergroundRooms.find((entry) => entry.id === state.selectedId) : undefined;
     if (selected) {
       const definition = getUndergroundDefinition(selected.type);
       const scp = selected.scpId ? state.scps.find((entry) => entry.id === selected.scpId) : undefined;
       return `
-        ${renderSelectionHeader(definition.icon, definition.name, `Niveau -${selected.level + 1}`)}
+        ${renderUndergroundSliceControls(state)}
+        ${renderSelectionHeader(definition.icon, definition.name, `Niveau -${selected.level + 1} · coupe ${undergroundRoomSectionY(state, selected)}`)}
         <p class="muted">${escapeHtml(definition.description)}</p>
         ${renderMetricGrid([
           ["État", percent(selected.condition)],
@@ -501,7 +548,7 @@ namespace SCPGame {
           ["Galerie", selected.sealed ? "Scellée" : "Ouverte"],
           ["À l'aplomb", getSurfaceRoomAboveUnderground(state, selected)
             ? getSurfaceDefinition(getSurfaceRoomAboveUnderground(state, selected)!.type).name : "Terrain sans pièce"],
-          ["Coupe", `A-A · surface Y=${getSiteSectionSurfaceY(state)}`]
+          ["Coupe", `Y=${undergroundRoomSectionY(state, selected)} / ${state.surfaceHeight - 1}`]
         ])}
         ${scp ? renderContainedScpCard(state, scp) : renderCompatibleTransfers(state, selected)}
         ${renderSelectionActions()}
@@ -513,8 +560,9 @@ namespace SCPGame {
       `;
     }
     return `
+      ${renderUndergroundSliceControls(state)}
       <section class="summary-card">
-        <h3>Coupe A-A — sous le bâtiment principal</h3>
+        <h3>Réseau souterrain à trois coordonnées</h3>
         ${renderMetricGrid([
           ["SCP confinés", String(state.scps.filter((scp) => scp.contained).length)],
           ["Cellules libres", String(state.undergroundRooms.filter((room) => !room.scpId && getUndergroundDefinition(room.type).containment >= 4).length)],
@@ -522,7 +570,7 @@ namespace SCPGame {
           ["Risque max", percent(Math.max(0, ...state.scps.filter((scp) => scp.contained).map((scp) => scp.breachRisk)))]
         ])}
       </section>
-      <p class="hint">La bande colorée au-dessus du niveau -1 montre les pièces réelles de la surface sur la coupe A-A. Seuls les puits sous un ascenseur du même axe permettent une descente.</p>
+      <p class="hint">Les modules sont placés sur l'axe (X, Y, profondeur). La bande supérieure reflète les vrais locaux au-dessus de la coupe Y sélectionnée. Les nouvelles galeries peuvent joindre d'autres coupes avec des traverses visibles ; seules les cages alignées avec les ascenseurs permettent la remontée.</p>
       <button class="wide-button" data-view="surface">Voir le plan intérieur au-dessus</button>
       ${renderUncontainedScps(state)}
       ${renderBuildCatalog(state, "underground")}
@@ -1072,6 +1120,26 @@ namespace SCPGame {
         break;
       }
       case "remove-access": result = removeSurfaceAccess(state, String(target.dataset.room), String(target.dataset.access)); break;
+      case "underground-level-prev": result = setUndergroundPlanLevel(state, getUndergroundPlanLevel(state) - 1); break;
+      case "underground-level-next": result = setUndergroundPlanLevel(state, getUndergroundPlanLevel(state) + 1); break;
+      case "underground-slice-prev": result = setUndergroundSlice(state, getSiteSectionSurfaceY(state) - 1); break;
+      case "underground-slice-next": result = setUndergroundSlice(state, getSiteSectionSurfaceY(state) + 1); break;
+      case "open-main-interior": {
+        state.activeInteriorFacilityId = undefined;
+        state.flags["annex-room-selected"] = "";
+        state.selectedId = undefined;
+        state.selectedType = undefined;
+        state.buildSelection = undefined;
+        state.view = "surface";
+        break;
+      }
+      case "select-annex-zone": {
+        const annex = getActiveInteriorFacility(state);
+        const zone = annex && getAnnexInteriorPlan(state, annex)?.rooms.find((entry) => entry.id === target.dataset.room);
+        if (zone) state.flags["annex-room-selected"] = zone.id;
+        else result = { ok: false, message: "Zone de l'annexe introuvable." };
+        break;
+      }
       case "toggle-underground-seal": {
         const room = state.undergroundRooms.find((entry) => entry.id === target.dataset.room);
         result = room ? setUndergroundSeal(state, room.id, !room.sealed)

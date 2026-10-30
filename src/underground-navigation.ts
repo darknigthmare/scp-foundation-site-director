@@ -22,30 +22,57 @@ namespace SCPGame {
       && (!member || member.clearance >= getUndergroundClearanceRequirement(room));
   }
 
+  // For historical compatibility the Point.y field still denotes LEVEL in
+  // underground simulation. The transverse coordinate is room.y / point.sectionY.
   export function undergroundRoomCenter(room: UndergroundRoom): Point {
     return { x: room.x + room.width / 2, y: room.level };
   }
 
-  export function areUndergroundRoomsConnected(left: UndergroundRoom, right: UndergroundRoom): boolean {
-    if (!canStaffEnterUndergroundRoom(left) || !canStaffEnterUndergroundRoom(right)) return false;
-    if (left.level === right.level) {
-      return left.x + left.width === right.x || right.x + right.width === left.x;
-    }
-    return left.type === "elevator-shaft" && right.type === "elevator-shaft"
-      && Math.abs(left.level - right.level) === 1 && left.x === right.x && left.width === right.width;
+  export function undergroundRoomPosition(state: GameState, room: UndergroundRoom): LayerPoint {
+    return { layer: "underground", x: room.x + room.width / 2,
+      y: room.level, level: room.level, sectionY: undergroundRoomSectionY(state, room) };
   }
 
-  // Weighted shortest route through actual room footprints and aligned shafts.
-  // No sealed room, gap in the rock or missing vertical link is traversable.
+  export function areUndergroundRoomsConnected(left: UndergroundRoom, right: UndergroundRoom,
+    state?: GameState): boolean {
+    if (!canStaffEnterUndergroundRoom(left) || !canStaffEnterUndergroundRoom(right)) return false;
+    const ly = state ? undergroundRoomSectionY(state, left) : left.y ?? 14;
+    const ry = state ? undergroundRoomSectionY(state, right) : right.y ?? 14;
+    if (left.level === right.level) {
+      // Same longitudinal row: cells must share a wall, not a proximity gap.
+      if (ly === ry) return left.x + left.width === right.x || right.x + right.width === left.x;
+      // Adjacent transverse rows connect only across an overlapping x interval.
+      return Math.abs(ly - ry) === 1
+        && Math.min(left.x + left.width, right.x + right.width) > Math.max(left.x, right.x);
+    }
+    return left.type === "elevator-shaft" && right.type === "elevator-shaft"
+      && Math.abs(left.level - right.level) === 1 && ly === ry
+      && left.x === right.x && left.width === right.width;
+  }
+
+  function routeTravelCost(state: GameState, left: UndergroundRoom, right: UndergroundRoom): number {
+    if (left.level !== right.level) return 6;
+    return Math.abs(undergroundRoomCenter(right).x - undergroundRoomCenter(left).x)
+      + 3 * Math.abs(undergroundRoomSectionY(state, right) - undergroundRoomSectionY(state, left)) + 0.5;
+  }
+
+  /**
+   * Dijkstra through physical (x, sectionY, depth) volumes, including
+   * horizontal longitudinal links, adjacent-row junctions and aligned shafts.
+   * Locked/disabled modules and intermediate clearance are hard constraints.
+   */
   export function planUndergroundRoute(state: GameState, from: LayerPoint,
     destination: UndergroundRoom, member?: StaffMember): UndergroundRoom[] | undefined {
     const level = from.level ?? from.y;
+    const sectionY = from.sectionY ?? getLegacyUndergroundSectionY(state);
     if (from.layer !== "underground" || !Number.isFinite(from.x)
       || !Number.isInteger(level) || level < 0 || level >= state.undergroundLevels
+      || !Number.isFinite(sectionY) || sectionY < 0 || sectionY >= state.surfaceHeight
       || from.x < 0 || from.x > state.undergroundWidth
       || !state.undergroundRooms.includes(destination) || !canStaffEnterUndergroundRoom(destination, member)) return undefined;
     const rooms = state.undergroundRooms.filter((room) => canStaffEnterUndergroundRoom(room, member));
     const origins = rooms.filter((room) => room.level === level
+      && Math.abs(sectionY - undergroundRoomSectionY(state, room)) < 0.00001
       && from.x >= room.x && from.x <= room.x + room.width);
     if (!origins.length) return undefined;
     const distance = new Map<string, number>();
@@ -68,10 +95,8 @@ namespace SCPGame {
       }
       visited.add(current.id);
       for (const neighbour of rooms) {
-        if (visited.has(neighbour.id) || !areUndergroundRoomsConnected(current, neighbour)) continue;
-        const vertical = current.level !== neighbour.level;
-        const cost = vertical ? 6 : Math.abs(undergroundRoomCenter(neighbour).x - undergroundRoomCenter(current).x) + 0.5;
-        const candidate = best + cost;
+        if (visited.has(neighbour.id) || !areUndergroundRoomsConnected(current, neighbour, state)) continue;
+        const candidate = best + routeTravelCost(state, current, neighbour);
         if (candidate < (distance.get(neighbour.id) ?? Infinity)) {
           distance.set(neighbour.id, candidate);
           previous.set(neighbour.id, current);
@@ -86,8 +111,7 @@ namespace SCPGame {
     shaft: UndergroundRoom;
   }
 
-  // Only the aligned elevator footprint on the same longitudinal section
-  // reaches the shaft: no connections between unrelated buildings.
+  /** The shaft's x/y footprint must emerge INSIDE the actual surface lift. */
   export function getUndergroundPortals(state: GameState): UndergroundPortal[] {
     const elevators = state.surfaceRooms.filter((room) => room.type === "elevator" && room.enabled && room.condition > 15);
     const shafts = state.undergroundRooms.filter((room) =>
@@ -95,9 +119,7 @@ namespace SCPGame {
     const portals: UndergroundPortal[] = [];
     for (const elevator of elevators) {
       for (const shaft of shafts) {
-        if (isShaftUnderSurfaceElevator(state, shaft, elevator)) {
-          portals.push({ elevator, shaft });
-        }
+        if (isShaftUnderSurfaceElevator(state, shaft, elevator)) portals.push({ elevator, shaft });
       }
     }
     return portals;
@@ -106,6 +128,6 @@ namespace SCPGame {
   export function hasUndergroundElevatorConnection(state: GameState,
     destination: UndergroundRoom, member?: StaffMember): boolean {
     return getUndergroundPortals(state).some(({ shaft }) =>
-      planUndergroundRoute(state, { layer: "underground", ...undergroundRoomCenter(shaft), level: 0 }, destination, member) !== undefined);
+      planUndergroundRoute(state, undergroundRoomPosition(state, shaft), destination, member) !== undefined);
   }
 }

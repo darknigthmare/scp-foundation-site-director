@@ -12,7 +12,7 @@ Tranche appliquée le 29 octobre 2026 sur la base 1.0.0 : éditeur des portes/sa
 
 Tranche du 30 octobre — **cohérence des trois vues ajoutée** : bâtiments du complexe principal projetés en toiture sur la vue Région à partir du plan réel de Surface ; sélection conservée entre la ville, le plan intérieur et la coupe souterraine ; axe de coupe A-A partagé ; vrais alignements ascenseurs/puits ; parcelle du Site réservée ; conservation des installations régionales d'anciennes sauvegardes. Les annexes extérieures restent des entités à part et non des salles d'intérieur.
 
-**Reste ouvert :** volumes réellement 3D, bâtiments multiples avec intérieurs propres, étages de surface, plusieurs axes de coupe Y, couloirs souterrains branchés sur deux dimensions, escaliers et éditeur de portes/sas souterrains.
+**Nouvelle tranche appliquée le 30 octobre :** inspection intérieure dédiée des annexes régionales, avec zones descriptives partageant l’état et l’identité de leur installation extérieure ; coupes souterraines Y multiples, mini-carte X–Y par niveau, galeries inter-coupes et ascenseurs alignés en X/Y ; déplacements transversaux physiques, sauvegardes compatibles (schéma 4) et tests de déviation après scellement. **Reste ouvert :** WebGL véritable, salles d’annexes constructibles et avec personnel, étages de surface, escaliers et éditeur de portes/sas souterrains ; visiteurs/convois autonomes.
 
 - dessin de salles par glisser-déposer et redimensionnement ;
 - portes, sas et sens de circulation ;

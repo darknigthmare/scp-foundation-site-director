@@ -133,3 +133,20 @@ démolition, sauvegardes et le scénario navigateur complémentaire font partie
 du contrôle de la PR.
 
 Rapport : `docs/qa/2026-10-30/THREE_VIEW_SPATIAL_CONTINUITY.md`.
+
+## 30 octobre 2026 — sous-sol multi-axes et inspection des annexes
+
+La source autoritative reste GameState. `UndergroundRoom.y` distingue l'axe transversal des niveaux
+de profondeur, tandis que les anciens modules sans Y sont migrés sur la coupe
+historique. `StaffMember.undergroundLink` conserve les jonctions physiques en cours,
+pour éviter de téléporter une personne lors de la fermeture d'une galerie ou
+d'un rechargement. La vue coupe et la mini-carte X–Y lisent les mêmes modules.
+
+Les intérieurs d'annexes sont des représentations inspectables calculées
+depuis `regionFacilities` : leurs activités, capacités et coûts ne sont pas
+dupliqués. Les déplacements autonomes dans ces annexes sont encore à faire.
+
+Les contrôles incluent les jonctions inter-coupes, accès par ascenseurs,
+permissions, retrait d'une route pendant son franchissement, migrations de
+sauvegardes, construction sur plusieurs coupes et inspection des annexes.
+Rapport : `docs/qa/2026-10-30/THREE_AXIS_UNDERGROUND_AND_ANNEXES.md`.

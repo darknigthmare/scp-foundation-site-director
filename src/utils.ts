@@ -138,8 +138,10 @@ namespace SCPGame {
     return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
   }
 
-  export function undergroundOverlap(a: { x: number; level: number; width: number }, b: { x: number; level: number; width: number }): boolean {
-    return a.level === b.level && a.x < b.x + b.width && a.x + a.width > b.x;
+  export function undergroundOverlap(a: { x: number; y?: number; level: number; width: number },
+    b: { x: number; y?: number; level: number; width: number }): boolean {
+    return a.level === b.level && (a.y ?? 14) === (b.y ?? 14)
+      && a.x < b.x + b.width && a.x + a.width > b.x;
   }
 
   export function deepClone<T>(value: T): T {

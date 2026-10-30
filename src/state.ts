@@ -1,6 +1,6 @@
 namespace SCPGame {
   const CONTAINMENT_ROOM_TAGS = ["safe", "euclid", "keter", "humanoid", "bio", "infohazard", "heavy", "temporal"];
-  const LOAD_SCHEMA_VERSION = 3;
+  const LOAD_SCHEMA_VERSION = 4;
   const SURFACE_ACCESS_SIDES: readonly SurfaceAccessSide[] = ["north", "east", "south", "west"];
   const SURFACE_ACCESS_TRAFFIC: readonly SurfaceTraffic[] = ["public", "staff", "security", "medical", "contaminated", "freight", "anomaly"];
   const SURFACE_ACCESS_COSTS: Record<SurfaceAccess["kind"], { funds: number; parts: number }> = {
@@ -186,6 +186,7 @@ namespace SCPGame {
       x,
       level,
       width: width ?? definition.width,
+      y: 14,
       condition: 100,
       staffAssigned: [],
       upgrades: [],
@@ -454,13 +455,41 @@ namespace SCPGame {
       ? state.surfaceRooms.find((room) => room.id === state.selectedId) : undefined;
     const selectedUnderground = state.selectedType === "underground-room"
       ? state.undergroundRooms.find((room) => room.id === state.selectedId) : undefined;
+    const selectedFacility = state.selectedType === "facility"
+      ? state.regionFacilities.find((facility) => facility.id === state.selectedId) : undefined;
+    const existingAnnex = previousView === "surface" && state.activeInteriorFacilityId
+      ? state.regionFacilities.find((facility) => facility.id === state.activeInteriorFacilityId) : undefined;
     state.view = view;
     state.buildSelection = undefined;
+    if (view === "surface" && ((selectedFacility && isRegionFacilityEnterable(selectedFacility)) || existingAnnex)) {
+      const facility = (selectedFacility && isRegionFacilityEnterable(selectedFacility) ? selectedFacility : existingAnnex)!;
+      state.activeInteriorFacilityId = facility.id;
+      state.selectedId = facility.id;
+      state.selectedType = "facility";
+      return;
+    }
+    state.activeInteriorFacilityId = undefined;
+    if (view === "region" && (selectedFacility || existingAnnex)) {
+      const facility = selectedFacility ?? existingAnnex!;
+      state.selectedId = facility.id;
+      state.selectedType = "facility";
+      return;
+    }
     if (view === "region" || view === "surface") {
       const linked = selectedSurface || (selectedUnderground && getSurfaceRoomAboveUnderground(state, selectedUnderground));
       state.selectedId = linked?.id;
       state.selectedType = linked ? "surface-room" : undefined;
     } else if (view === "underground") {
+      if (selectedUnderground) setUndergroundSlice(state, undergroundRoomSectionY(state, selectedUnderground));
+      else if (selectedSurface) {
+        const portals = selectedSurface.type === "elevator"
+          ? getUndergroundPortals(state).filter((portal) => portal.elevator.id === selectedSurface.id) : [];
+        const section = portals[0] ? undergroundRoomSectionY(state, portals[0].shaft)
+          : isSurfaceRoomOnUndergroundSection(state, selectedSurface)
+            ? getSiteSectionSurfaceY(state)
+            : Math.min(state.surfaceHeight - 1, selectedSurface.y + Math.floor(selectedSurface.height / 2));
+        setUndergroundSlice(state, section);
+      }
       const linked = selectedUnderground || (selectedSurface && getUndergroundRoomBelowSurface(state, selectedSurface));
       state.selectedId = linked?.id;
       state.selectedType = linked ? "underground-room" : undefined;
@@ -649,13 +678,18 @@ namespace SCPGame {
     return { ok: true, message: "Sas évacué du côté d'origine et verrouillé. Aucun passage n'a été compté." };
   }
 
-  export function buildUndergroundRoom(state: GameState, type: UndergroundRoomType, x: number, level: number): { ok: boolean; message: string } {
+  export function buildUndergroundRoom(state: GameState, type: UndergroundRoomType, x: number, level: number,
+    sectionY = getSiteSectionSurfaceY(state)): { ok: boolean; message: string } {
     const definition = getUndergroundDefinition(type);
+    if (!Number.isInteger(sectionY) || sectionY < 0 || sectionY >= state.surfaceHeight)
+      return { ok: false, message: "Coupe souterraine hors limites." };
     if (!isUndergroundDefinitionUnlocked(state, definition)) return { ok: false, message: "Module non autorisé ou recherche manquante." };
     if (level < 0 || level >= state.undergroundLevels || x < 0 || x + definition.width > state.undergroundWidth) return { ok: false, message: "Construction hors des limites géologiques." };
     if (level >= 5 && !isResearchUnlockActive(state, "level-5-plus") && state.mode !== "sandbox") return { ok: false, message: "L'excavation profonde n'est pas encore maîtrisée." };
-    const candidate = { x, level, width: definition.width };
-    if (state.undergroundRooms.some((room) => undergroundOverlap(candidate, room))) return { ok: false, message: "Ce volume est déjà occupé." };
+    const candidate = { x, y: sectionY, level, width: definition.width };
+    if (state.undergroundRooms.some((room) => undergroundOverlap(candidate,
+      { ...room, y: undergroundRoomSectionY(state, room) })))
+      return { ok: false, message: "Ce volume est déjà occupé sur cette coupe." };
     const depthCostMultiplier = 1 + level * 0.12;
     const scaledCost: Cost = {};
     Object.entries(definition.cost).forEach(([key, amount]) => {
@@ -663,12 +697,13 @@ namespace SCPGame {
     });
     if (!payCost(state.resources, scaledCost)) return { ok: false, message: "Ressources insuffisantes pour cette profondeur." };
     const room = createUndergroundRoom(type, x, level);
+    room.y = sectionY;
     state.undergroundRooms.push(room);
     state.selectedId = room.id;
     state.selectedType = "underground-room";
     autoAssignStaff(state);
-    logHistory(state, `${definition.name} construit au niveau -${level + 1}.`);
-    return { ok: true, message: `${definition.name} opérationnel au niveau -${level + 1}.` };
+    logHistory(state, `${definition.name} construit au niveau -${level + 1}, coupe Y=${sectionY}.`);
+    return { ok: true, message: `${definition.name} opérationnel au niveau -${level + 1}, coupe ${sectionY + 1}.` };
   }
 
   export function setUndergroundSeal(state: GameState, roomId: string, sealed: boolean): { ok: boolean; message: string } {
@@ -1130,7 +1165,9 @@ namespace SCPGame {
     const point: Check = (value) => shape(value, { x: finite, y: finite }, ["x", "y"]) && record(value)
       && Number(value.x) >= 0 && Number(value.x) < size("surfaceWidth") && Number(value.y) >= 0 && Number(value.y) < size("surfaceHeight");
     const layerPoint: Check = (value) => {
-      if (!shape(value, { x: finite, y: finite, layer: oneOf(layers), level: integer(0, size("undergroundLevels") - 1) }, ["x", "y", "layer"]) || !record(value)) return false;
+      if (!shape(value, { x: finite, y: finite, layer: oneOf(layers),
+        level: integer(0, size("undergroundLevels") - 1),
+        sectionY: (v) => finite(v) && Number(v) >= 0 && Number(v) < size("surfaceHeight") }, ["x", "y", "layer"]) || !record(value)) return false;
       const width = size(value.layer === "surface" ? "surfaceWidth" : value.layer === "region" ? "regionWidth" : "undergroundWidth");
       const height = size(value.layer === "surface" ? "surfaceHeight" : value.layer === "region" ? "regionHeight" : "undergroundLevels");
       return Number(value.x) >= 0 && Number(value.x) < width && Number(value.y) >= 0 && Number(value.y) < height;
@@ -1190,7 +1227,8 @@ namespace SCPGame {
     const undergroundRoom: Check = (value) => {
       if (!shape(value, {
         id, type: oneOf(UNDERGROUND_ROOM_DEFINITIONS.map((entry) => entry.type)),
-        x: integer(0), level: integer(0, size("undergroundLevels") - 1), width: integer(1, 256),
+        x: integer(0), y: integer(0, size("surfaceHeight") - 1),
+        level: integer(0, size("undergroundLevels") - 1), width: integer(1, 256),
         condition: finite, enabled: boolean, sealed: boolean, powerPriority: finite, name: text, scpId: text, ...roomArrays
       }, ["id", "type", "x", "level", "width", "condition"]) || !record(value)) return false;
       return Number(value.x) + Number(value.width) <= size("undergroundWidth");
@@ -1210,7 +1248,10 @@ namespace SCPGame {
       traits: stringArray, status: oneOf(statuses), position: layerPoint, target: layerPoint,
       targetRoomId: text, assignmentRoomId: text, path: array(point), pathIndex: integer(0),
       shift: oneOf(["day", "night"]), experience: finite, loyalty: finite, compromised: boolean, taskProgress: finite,
-      routeBlockedReason: (entry) => typeof entry === "string" && entry.length <= 512
+      routeBlockedReason: (entry) => typeof entry === "string" && entry.length <= 512,
+      undergroundLink: (entry) => shape(entry, {
+        fromId: id, toId: id, crossingX: finite
+      }, ["fromId", "toId", "crossingX"])
     }, ["id", "name", "role", "clearance", "salary", "skills", "needs", "traits", "status", "position", "experience"]);
     const scpIds = SCP_DEFINITIONS.map((entry) => entry.id);
     const scp: Check = (value) => shape(value, {
@@ -1275,7 +1316,7 @@ namespace SCPGame {
       staff: array(member), workItems: array(workItem), scps: array(scp), procedures: array(procedure),
       researchNodes: array((value) => shape(value, { id, completed: boolean }, ["id"])), events: array(event),
       campaign: array(chapter), notifications: array(notification), history: stringArray,
-      currentEventId: text, selectedId: text,
+      currentEventId: text, selectedId: text, activeInteriorFacilityId: text,
       selectedType: oneOf(["facility", "surface-room", "underground-room", "staff", "scp", "zone"]),
       flags: (value) => record(value) && Object.values(value).every(primitive),
       camera: (value) => shape(value, Object.fromEntries(views.map((view) => [view, camera]))),
@@ -1389,6 +1430,10 @@ namespace SCPGame {
       if (Boolean(state.flags[key]) && !Number.isFinite(timestamp)) state.flags[`${key}:at`] = state.elapsedMinutes;
     });
     state.flags["load-schema-version"] = LOAD_SCHEMA_VERSION;
+    if (state.activeInteriorFacilityId && !state.regionFacilities.some((facility) =>
+      facility.id === state.activeInteriorFacilityId && isRegionFacilityEnterable(facility))) {
+      state.activeInteriorFacilityId = undefined;
+    }
     if (state.currentEventId && !state.events?.some((event) => event.id === state.currentEventId && !event.resolved)) state.currentEventId = undefined;
     state.regionFacilities.forEach((facility) => {
       facility.enabled = facility.enabled !== false;
@@ -1414,6 +1459,8 @@ namespace SCPGame {
     });
     if (!hasValidSurfaceAccessReferences(state)) return undefined;
     state.undergroundRooms.forEach((room) => {
+      // A historical room without Y belongs to the former single A-A cut.
+      room.y = undergroundRoomSectionY(state, room);
       room.staffAssigned = room.staffAssigned ?? [];
       room.upgrades = room.upgrades ?? [];
       room.enabled = room.enabled !== false;
@@ -1421,7 +1468,32 @@ namespace SCPGame {
       const tags = getUndergroundDefinition(room.type).tags;
       room.powerPriority = room.powerPriority ?? (tags.includes("keter") || tags.includes("bio") ? 3 : 2);
     });
+    const roomIds = new Set(state.undergroundRooms.map((room) => room.id));
+    for (const member of state.staff) {
+      const link = member.undergroundLink;
+      if (!link) continue;
+      const from = state.undergroundRooms.find((room) => room.id === link.fromId);
+      const to = state.undergroundRooms.find((room) => room.id === link.toId);
+      const section = member.position.sectionY ?? getLegacyUndergroundSectionY(state);
+      if (!from || !to || member.position.layer !== "underground"
+        || from.level !== to.level || (member.position.level ?? member.position.y) !== from.level
+        || Math.abs(undergroundRoomSectionY(state, from) - undergroundRoomSectionY(state, to)) !== 1
+        || Math.min(from.x + from.width, to.x + to.width) <= Math.max(from.x, to.x)
+        || link.crossingX <= Math.max(from.x, to.x)
+        || link.crossingX >= Math.min(from.x + from.width, to.x + to.width)
+        || Math.abs(member.position.x - link.crossingX) > 0.0001
+        || section < Math.min(undergroundRoomSectionY(state, from), undergroundRoomSectionY(state, to))
+        || section > Math.max(undergroundRoomSectionY(state, from), undergroundRoomSectionY(state, to))) {
+        return undefined;
+      }
+    }
     state.staff.forEach((member, index) => {
+      if (member.position.layer === "underground" && member.position.sectionY === undefined)
+        member.position.sectionY = getLegacyUndergroundSectionY(state);
+      if (member.target?.layer === "underground" && member.target.sectionY === undefined)
+        member.target.sectionY = getLegacyUndergroundSectionY(state);
+      if (member.undergroundLink && (!roomIds.has(member.undergroundLink.fromId)
+        || !roomIds.has(member.undergroundLink.toId))) member.undergroundLink = undefined;
       member.path = member.path ?? [];
       member.pathIndex = member.pathIndex ?? 0;
       member.shift = member.shift ?? (index % 3 === 0 ? "night" : "day");

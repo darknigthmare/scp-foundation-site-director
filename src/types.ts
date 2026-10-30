@@ -23,6 +23,8 @@ namespace SCPGame {
   export interface LayerPoint extends Point {
     layer: Layer;
     level?: number;
+    /** Transverse row in the underground plane; y still describes depth there. */
+    sectionY?: number;
   }
 
   export interface Cost {
@@ -196,6 +198,8 @@ namespace SCPGame {
     type: UndergroundRoomType;
     x: number;
     level: number;
+    /** Transverse coordinate; omitted in historical one-section saves. */
+    y?: number;
     width: number;
     condition: number;
     staffAssigned: string[];
@@ -248,6 +252,8 @@ namespace SCPGame {
     compromised: boolean;
     taskProgress: number;
     routeBlockedReason?: string;
+    /** Physical crossing between adjacent underground rows, persisted mid-step. */
+    undergroundLink?: { fromId: string; toId: string; crossingX: number };
   }
 
   export interface WorkItem {
@@ -485,6 +491,8 @@ namespace SCPGame {
     regionFacilities: RegionFacility[];
     surfaceRooms: SurfaceRoom[];
     undergroundRooms: UndergroundRoom[];
+    /** Region annex whose derived interior is currently being inspected. */
+    activeInteriorFacilityId?: string;
     staff: StaffMember[];
     workItems: WorkItem[];
     scps: SCPInstance[];

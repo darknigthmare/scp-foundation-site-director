@@ -1,6 +1,6 @@
 # SCP Foundation: Site Director — Deep Protocol
 
-**Base 1.0.0 — build jouable hors ligne, tranche Operations : accès et transit souterrain**  
+**Base 1.0.0 — build jouable hors ligne, tranche Operations : région, intérieurs d’annexes et réseau souterrain multi-axes**  
 City-builder régional, gestion opérationnelle du complexe de surface, confinement vertical souterrain et commandement tactique de crise.
 
 ![Gestion du complexe de surface](tests/surface.png)
@@ -40,7 +40,7 @@ Les sas traitent une personne à la fois, dans l'ordre d'arrivée, avec admissio
 
 Les sauvegardes antérieures reçoivent des portes compatibles sans remplacer leurs salles ni leur personnel. Les réglages d'accès s'appliquent à chaque passage : sécuriser une salle exige de configurer tous ses accès.
 
-Cette tranche conserve la version de base 1.0.0. Le dessin libre des salles, les itinéraires souterrains physiques, les flux autonomes de public/fret/SCP et les autres systèmes de la version Operations complète restent dans la feuille de route.
+Cette tranche conserve la version de base 1.0.0. Les portes/sas et les déplacements souterrains sont désormais intégrés. Le dessin libre des salles, les flux autonomes de public/fret/SCP et les autres systèmes de la version Operations complète restent dans la feuille de route.
 
 ## Circulation souterraine physique — tranche Operations
 
@@ -63,6 +63,20 @@ Dans la vue **Sous-sol**, sélectionner un module permet de voir son habilitatio
 **Sauvegardes :** aucun identifiant de salle ni bâtiment miroir n'a été ajouté aux sauvegardes. Les annexes des anciennes parties qui recouperaient exceptionnellement la nouvelle emprise ne sont pas déplacées ni supprimées. Les anciennes parties restent importables selon le schéma de validation actuel.
 
 **Vérification :** 101 tests métier et 18 étapes navigateur Chromium réussis pour le lot fonctionnel, sans erreur console. [Rapport QA des vues liées](docs/qa/2026-10-30/THREE_VIEW_SPATIAL_CONTINUITY.md). La base du jeu demeure **1.0.0** ; cette tranche ne signifie pas que toute la version Operations 1.1 est terminée.
+
+## Annexes explorables et sous-sol sur trois coordonnées — tranche Operations
+
+Le plan régional **reste la vue extérieure du même territoire**. En sélectionnant un bâtiment régional exploitable (centrale, eau, dépôt, etc.) puis **Explorer l’intérieur**, on ouvre désormais son plan intérieur, distinct de celui du bâtiment principal. Chaque annexe affiche **quatre zones fonctionnelles détaillées et inspectables**, dérivées de son type, de son niveau et de son état réels. Un clic choisit une zone et décrit son usage. Les routes et espaces verts ne sont pas présentés comme des bâtiments habitables. **Attention : ces pièces d’annexe sont consultatives** : elles ne sont pas encore des pièces librement constructibles, ni des salles possédant des employés/pathfinders indépendants. Les ressources proviennent toujours de l’installation régionale d’origine, sans double comptage.
+
+La simulation souterraine n'est plus limitée au seul trait de coupe A-A. Chaque module peut avoir trois coordonnées : **x, Y (coupe transversale) et profondeur**. Depuis la vue Sous-sol, les boutons **Coupe précédente / suivante** parcourent l’axe Y et la mini-carte montre tous les modules d'un **niveau sélectionné** dans un véritable plan horizontal X–Y. On peut changer la profondeur visualisée et sélectionner un module sur le plan pour retrouver sa coupe. Un module construit sur une nouvelle coupe reste à cet endroit, séparé des emprises occupées sur les autres coupes.
+
+Les galeries se raccordent horizontalement en X, transversalement en Y lorsque leurs empreintes en X se chevauchent, et verticalement par des puits d’ascenseur alignés sur X **et** Y. Le personnel marche physiquement entre les coupes (vitesse 0,55 unité/minute), respecte les habilitations, attend les ascenseurs et peut contourner un secteur fermé par un autre itinéraire. La progression d’une jonction transversale est sérialisée pour reprendre après sauvegarde. Un accès de surface ne donne un accès souterrain que si son puits émerge réellement **sous son ascenseur à ces deux coordonnées**.
+
+**Compatibilité :** les anciens modules souterrains sans coordonnée Y sont migrés sur la coupe initiale (Y=14 pour le plan de départ), sans déplacer les SCP ou reconstruire les salles. La validation de chargement accepte les anciens schémas reconnus et refuse les jonctions inventées ou coordonnées invalides ; le marqueur de schéma passe à 4. L'intérieur d'une annexe sélectionnée se conserve au rechargement.
+
+Le jeu est toujours rendu en **2.5D avec coupe et mini-carte 2D** : il possède désormais une topologie et une navigation tridimensionnelles, **pas** un affichage WebGL 3D volumétrique ni des étages d'annexes modélisés en 3D. Des sas souterrains configurables, véritables portes de traversée, occupation détaillée des annexes et agents passant entre bâtiments restent à développer.
+
+**Tests :** 118 tests métier locaux (dont 17 nouveaux tests de réseau et d'annexes) réussis. La validation navigateur complète et le paquet jouable sont consignés dans le [rapport QA](docs/qa/2026-10-30/THREE_AXIS_UNDERGROUND_AND_ANNEXES.md) après la CI GitHub. La base reste 1.0.0 ; Operations 1.1 complète n'est pas déclarée livrée.
 
 ## Lancement rapide
 

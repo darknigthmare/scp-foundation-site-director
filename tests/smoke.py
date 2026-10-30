@@ -213,8 +213,54 @@ def run():
                 # Return to the subsoil without fabricating a connection to a
                 # medical room outside the longitudinal A-A section.
                 page.locator('button[data-view="underground"]').first.click()
-                expect(panel).to_contain_text("Coupe A-A")
+                expect(panel).to_contain_text("Coupe souterraine Y=")
             step("même Site dans les trois vues, toitures et coupe A-A", coherent_three_views)
+
+            def annex_interior_visit():
+                page.locator('button[data-view="region"]').first.click()
+                canvas = page.locator("#game-canvas")
+                rect = canvas.bounding_box()
+                assert rect is not None
+                width = rect["width"]
+                w = max(26, min(54, width / 15))
+                h = w * .48
+                world_x, world_y = 12.35, 3.35  # Initial power plant (external annex)
+                x = width / 2 + (world_x - world_y) * w * .5
+                y = 54 + (world_x + world_y) * h * .5
+                canvas.click(position={"x": x, "y": y})
+                panel = page.locator("#right-panel")
+                expect(panel).to_contain_text("Explorer l'intérieur de cette annexe")
+                panel.locator('button[data-view="surface"]').click()
+                expect(panel).to_contain_text("Salle des turbines")
+                expect(panel).to_contain_text("Plan intérieur de l'installation extérieure")
+                page.screenshot(path=str(OUT / "annex-power-plant.png"), full_page=True)
+                panel.locator('button[data-action="select-annex-zone"][data-room$=":control"]').click()
+                expect(panel).to_contain_text("Régulation électrique")
+                page.screenshot(path=str(OUT / "annex-control-room.png"), full_page=True)
+                panel.locator('button[data-action="open-main-interior"]').click()
+                expect(panel).to_contain_text("Intérieur du bâtiment principal")
+            step("extérieur → plan intérieur de la vraie annexe électrique", annex_interior_visit)
+
+            def underground_3d_slices():
+                page.locator('button[data-view="underground"]').first.click()
+                panel = page.locator("#right-panel")
+                expect(panel).to_contain_text("Navigation des coupes souterraines")
+                expect(panel).to_contain_text("Plan horizontal")
+                expect(panel).to_contain_text("Coupe souterraine Y=")
+                page.screenshot(path=str(OUT / "underground-3d-slice.png"), full_page=True)
+                # Cut Y can be moved independently of the depth shown by the overview.
+                before = panel.locator('[aria-label="Navigation des coupes souterraines"] h3').first.inner_text()
+                panel.locator('[data-action="underground-slice-next"]').click()
+                after = panel.locator('[aria-label="Navigation des coupes souterraines"] h3').first.inner_text()
+                assert after != before
+                panel.locator('[data-action="underground-slice-prev"]').click()
+                assert panel.locator('[aria-label="Navigation des coupes souterraines"] h3').first.inner_text() == before
+                panel.locator('[data-action="underground-level-next"]').click()
+                expect(panel).to_contain_text("Niveau -2")
+                page.screenshot(path=str(OUT / "underground-plan-second-level.png"), full_page=True)
+                panel.locator('[data-action="underground-level-prev"]').click()
+                expect(panel).to_contain_text("Niveau -1")
+            step("3 axes réels : coupes Y et mini-plan des profondeurs", underground_3d_slices)
 
 
             def management():
