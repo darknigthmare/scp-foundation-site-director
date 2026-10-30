@@ -199,11 +199,11 @@ def run():
                 expect(water).to_have_attribute("aria-pressed", "true")
                 water.click()
                 expect(water).to_have_attribute("aria-pressed", "false")
-                expect(panel).to_contain_text("Eau : Coupée")
+                expect(panel.locator(".underground-utilities .utility-indicator").nth(1)).to_contain_text("Eau : Hors service")
                 page.screenshot(path=str(OUT / "underground-utility-water-cut.png"), full_page=True)
                 water.click()
                 expect(water).to_have_attribute("aria-pressed", "true")
-                expect(panel).to_contain_text("Eau : Distribuée")
+                expect(panel.locator(".underground-utilities .utility-indicator").nth(1)).to_contain_text("Eau : Raccordé")
                 page.screenshot(path=str(OUT / "underground-utilities.png"), full_page=True)
             step("réseaux physiques du sous-sol, coupure et remise en eau", physical_utility_circuits)
 
