@@ -98,7 +98,7 @@ def run():
             page.screenshot(path=str(OUT / "region.png"), full_page=True)
 
             def place_first(layer, nav_view, shot):
-                page.locator(f'button[data-view="{nav_view}"]').click()
+                page.locator(f'#left-nav button[data-view="{nav_view}"]').click()
                 page.wait_for_timeout(250)
                 build_buttons = page.locator('#right-panel button.build-item:not([disabled])')
                 expect(build_buttons.first).to_be_visible()
