@@ -1045,13 +1045,13 @@ namespace SCPGame {
 
     const utilities = getUndergroundUtilityStatus(state, room);
     const powerRatio = state.resources.powerCapacity > 0 ? state.resources.power / state.resources.powerCapacity : 0;
-    if (!utilities.power) score -= 36;
-    else if (powerRatio >= scpDefinition.requirements.powerReliability) score += 10;
-    else score -= (scpDefinition.requirements.powerReliability - powerRatio) * 35;
-    // Life support and water cooling are local services. Global reserves do
-    // not travel across a broken cable, valve or absent physical duct.
-    if (!utilities.air) score -= 26;
-    if (roomDefinition.waterUse > 0 && !utilities.water) score -= 12;
+    // A missing cable affects each SCP's facility differently: mechanical
+    // SCP-914 remains capable of turning, while SCP-173 loses illumination,
+    // and SCP-682 loses the powered acid bath. The anomaly is not the machine.
+    const behavior = inspectSCPBehavior(state, scp);
+    if (utilities.power && powerRatio >= scpDefinition.requirements.powerReliability) score += 10;
+    else if (utilities.power) score -= (scpDefinition.requirements.powerReliability - powerRatio) * 35;
+    score -= behavior?.compliancePenalty ?? 0;
 
     const flags = scpDefinition.requirements.procedureFlags;
     if (flags.includes("backup-power")) score += procedure.backupPower ? 6 : -12;
@@ -1073,8 +1073,7 @@ namespace SCPGame {
     if (scp.definitionId === "scp-173") {
       if (assignedMembers.length < 3) score -= 25;
       if (procedure.observationLevel >= 80) score += 8;
-      const eyes = state.scps.find((candidate) => candidate.definitionId === "scp-131" && candidate.contained);
-      if (eyes && eyes.roomId && state.undergroundRooms.find((candidate) => candidate.id === eyes.roomId)?.level === room.level) score += 5;
+      if (scp131CanAssist173(state, room)) score += 5;
     }
     if (scp.definitionId === "scp-096" && procedure.opticalMonitoring) score -= 50;
     if (scp.definitionId === "scp-049") score += procedure.humaneCare ? 8 : -15;
@@ -1082,8 +1081,7 @@ namespace SCPGame {
     if (scp.definitionId === "scp-939") score += procedure.biometricMonitoring && procedure.analogBackup ? 10 : -15;
     if ((scp.definitionId === "scp-914" || scp.definitionId === "scp-294") && !procedure.restrictedTesting) score -= 14;
     if (scp.definitionId === "scp-682") {
-      const acidSystem = state.undergroundRooms.some((candidate) => candidate.level === room.level && candidate.type === "acid-system");
-      score += acidSystem ? 18 : -35;
+      score += behavior?.acidFeedOperational ? 18 : -35;
     }
     if (scp.definitionId === "scp-008") score += procedure.redundantVentilation ? 12 : -20;
 
@@ -1098,6 +1096,7 @@ namespace SCPGame {
       const room = state.undergroundRooms.find((entry) => entry.id === scp.roomId);
       if (!procedure || !room) return;
       const compliance = evaluateProcedureCompliance(state, scp);
+      const behavior = inspectSCPBehavior(state, scp);
       procedure.compliance = round(compliance, 1);
 
       let supplyShortage = 0;
@@ -1111,10 +1110,18 @@ namespace SCPGame {
       const complianceEffect = (50 - compliance) * 0.035;
       const conditionPenalty = Math.max(0, 65 - room.condition) * 0.04;
       const randomNoise = (Math.sin((state.elapsedMinutes + definition.risk * 19) / 73) + 1) * 0.04;
-      scp.breachRisk = clamp(scp.breachRisk + basePressure + complianceEffect + conditionPenalty + supplyShortage + randomNoise - (compliance > 75 ? 0.9 : 0), 0, 120);
+      scp.breachRisk = clamp(scp.breachRisk + basePressure + complianceEffect + conditionPenalty + supplyShortage + randomNoise
+        + (behavior?.hourlyPressure ?? 0) - (compliance > 75 ? 0.9 : 0), 0, 120);
+      if (scp.definitionId === "scp-106") {
+        room.condition = clamp(room.condition - (procedure.maintenanceFrequency >= 70 ? 0.25 : 1.2), 0, 100);
+      }
       const previousResearchProgress = scp.researchProgress;
-      scp.researchProgress = clamp(scp.researchProgress + Math.max(0.1, compliance / 120), 0, 100);
-      scp.knowledge = clamp(scp.knowledge + compliance / 700, 0, 100);
+      // Passive studies require instruments, safe access and someone actually
+      // working at the SCP's room. A dark, deserted lab cannot finish a dossier.
+      const studyFactor = (behavior?.localTeam ?? 0) > 0 ? (behavior?.studyMultiplier ?? 0) : 0;
+      const gain = compliance / 120 * studyFactor;
+      scp.researchProgress = clamp(scp.researchProgress + gain, 0, 100);
+      scp.knowledge = clamp(scp.knowledge + compliance / 700 * studyFactor, 0, 100);
       const researchFlag = `scp-research-complete:${scp.definitionId}`;
       if (previousResearchProgress < 100 && scp.researchProgress >= 100 && !Boolean(state.flags[researchFlag])) {
         state.flags[researchFlag] = true;
@@ -1126,21 +1133,41 @@ namespace SCPGame {
       scp.daysContained += 1 / 24;
       scp.mood = clamp(scp.mood + (procedure.humaneCare ? 0.4 : -0.25) - definition.risk * 0.015, 0, 100);
 
-      if (scp.definitionId === "scp-999") {
-        state.staff.forEach((member) => {
+      if (scp.definitionId === "scp-999" && procedure.humaneCare && state.resources.food > 0
+        && behavior?.utilities.air && !state.crisis.active) {
+        // Only people on the scene receive a calming interaction. A sealed
+        // cell does not magically soothe every worker above ground.
+        getSCPNearbyStaff(state, room).filter((member) => member.assignmentRoomId === room.id).forEach((member) => {
           member.needs.stress = clamp(member.needs.stress - 0.25, 0, 100);
           member.needs.morale = clamp(member.needs.morale + 0.15, 0, 100);
         });
-        scp.breachRisk = clamp(scp.breachRisk - 2, 0, 100);
+        scp.breachRisk = clamp(scp.breachRisk - 1.2, 0, 100);
       }
-      if (scp.definitionId === "scp-914" && compliance > 75 && simulationChance(state, `scp-914-${scp.id}`, 0.18)) state.resources.parts += 1.5;
-      if (scp.definitionId === "scp-294" && compliance > 70 && simulationChance(state, `scp-294-${scp.id}`, 0.15)) state.resources.medical += 0.6;
-      if (scp.definitionId === "scp-087" && !procedure.restrictedTesting && simulationChance(state, `scp-087-${scp.id}`, 0.08)) scp.breachRisk += 8;
-
-      if (compliance >= 80) scp.activeEffect = "Confinement nominal";
-      else if (compliance >= 60) scp.activeEffect = "Confinement sous surveillance";
-      else if (compliance >= 40) scp.activeEffect = "Procédure dégradée";
-      else scp.activeEffect = "Risque critique";
+      // 914/294 generate resources only through a funded, authorized,
+      // supervised player action. SCP-087 exploration stays forbidden.
+      if (behavior?.faults.length) {
+        const first = behavior.faults.find((fault) => fault.priority === "critical") ?? behavior.faults[0];
+        scp.activeEffect = first.effect;
+        const issue = `${first.service}:${first.effect}`;
+        const key = `scp-operational-warning:${scp.id}`;
+        if (state.flags[key] !== issue) {
+          state.flags[key] = issue;
+          addNotification(state, `Diagnostic ${definition.designation}`, first.effect,
+            first.priority === "critical" ? "critical" : first.priority === "major" ? "major" : "minor");
+          logHistory(state, `Diagnostic ${definition.designation} : ${first.effect}`);
+        }
+      } else {
+        const key = `scp-operational-warning:${scp.id}`;
+        if (state.flags[key] && state.flags[key] !== "ok") {
+          addNotification(state, `${definition.designation} : mesures rétablies`,
+            "Les contrôles particuliers de la cellule sont revenus à un état nominal.", "info");
+          state.flags[key] = "ok";
+        }
+        if (compliance >= 80) scp.activeEffect = "Confinement nominal";
+        else if (compliance >= 60) scp.activeEffect = "Confinement sous surveillance";
+        else if (compliance >= 40) scp.activeEffect = "Procédure dégradée";
+        else scp.activeEffect = "Risque critique";
+      }
 
       if (scp.breachRisk >= 100 && !state.crisis.active) {
         startCrisis(state, "scp-breach", scp.id);

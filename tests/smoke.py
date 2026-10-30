@@ -175,6 +175,23 @@ def run():
 
             step("transfert d’un SCP vers une cellule compatible", transfer_scp)
 
+            def individual_scp_protocols():
+                panel = page.locator("#right-panel")
+                diagnostics = panel.locator("details.scp-behavior-panel").first
+                expect(diagnostics).to_be_visible()
+                expect(diagnostics.locator("summary")).to_contain_text("Comportement et réponse spécifique")
+                expect(diagnostics).to_contain_text("Recensement")
+                expect(diagnostics).to_contain_text("Électricité")
+                expect(diagnostics).to_contain_text("Ventilation")
+                response = diagnostics.locator('button[data-action="scp-response"]')
+                expect(response).to_be_enabled()
+                response.click()
+                expect(page.locator("#toast")).to_contain_text("SCP-131")
+                expect(response).to_be_disabled()
+                expect(diagnostics).to_contain_text("délai de 60 minutes")
+                page.screenshot(path=str(OUT / "scp-131-individual-response.png"), full_page=True)
+            step("SCP-131 : diagnostic individuel, réponse et délai de réutilisation", individual_scp_protocols)
+
             def underground_network_panel():
                 panel = page.locator("#right-panel")
                 expect(panel).to_contain_text("Habilitation")
