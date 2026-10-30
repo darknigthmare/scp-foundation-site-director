@@ -150,3 +150,13 @@ Les contrôles incluent les jonctions inter-coupes, accès par ascenseurs,
 permissions, retrait d'une route pendant son franchissement, migrations de
 sauvegardes, construction sur plusieurs coupes et inspection des annexes.
 Rapport : `docs/qa/2026-10-30/THREE_AXIS_UNDERGROUND_AND_ANNEXES.md`.
+
+## QA vérifiée — 30 octobre 2026
+
+La navigation Surface générale n'ouvre jamais involontairement une annexe :
+l'action explicite `enter-annex` gère ce changement d'intérieur. Un sélecteur
+accessible `underground-slice-jump` permet de passer directement entre les
+coupes sans parcourir une à une toutes les coordonnées Y. Le pipeline
+[41044273246](https://github.com/darknigthmare/scp-foundation-site-director/actions/runs/41044273246)
+a validé **119 tests Node, 20 étapes Chromium et 0 message navigateur**,
+y compris reprise des sauvegardes après fermeture et rechargement hors ligne.
