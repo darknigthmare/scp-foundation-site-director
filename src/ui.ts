@@ -522,6 +522,10 @@ namespace SCPGame {
       <div class="catalog-heading"><h3>Coupe souterraine Y=${y}</h3><span>${y + 1} / ${state.surfaceHeight}</span></div>
       <div class="action-row"><button data-action="underground-slice-prev" ${y <= 0 ? "disabled" : ""}>Coupe précédente</button>
       <button data-action="underground-slice-next" ${y >= state.surfaceHeight - 1 ? "disabled" : ""}>Coupe suivante</button></div>
+      <label class="hint" for="underground-slice-jump">Accès direct à une coupe</label>
+      <select id="underground-slice-jump" class="underground-slice-jump" data-slice-select aria-label="Choisir la coupe souterraine">
+        ${Array.from({ length: state.surfaceHeight }, (_, row) => `<option value="${row}" ${row === y ? "selected" : ""}>Y=${row} · ${state.undergroundRooms.filter((room) => undergroundRoomSectionY(state, room) === row).length} module(s)</option>`).join("")}
+      </select>
       <div class="catalog-heading"><h3>Plan horizontal</h3><span>Niveau -${getUndergroundPlanLevel(state) + 1}</span></div>
       <div class="action-row"><button data-action="underground-level-prev" ${getUndergroundPlanLevel(state) <= 0 ? "disabled" : ""}>Niveau au-dessus</button>
       <button data-action="underground-level-next" ${getUndergroundPlanLevel(state) >= state.undergroundLevels - 1 ? "disabled" : ""}>Niveau inférieur</button></div>
@@ -1203,6 +1207,13 @@ namespace SCPGame {
         if (room && offset) offset.value = String(clamp(Number(offset.value) || 1, 1, input.value === "north" || input.value === "south" ? room.width : room.height));
       }
       updateSurfaceAccessForm(activeRuntime.state);
+      return;
+    }
+    if (input.dataset.sliceSelect !== undefined) {
+      const result = setUndergroundSlice(activeRuntime.state, Number(input.value));
+      if (!result.ok) showToast(result.message, "error");
+      activeRuntime.uiDirty = true;
+      refreshUI(activeRuntime, true);
       return;
     }
     if (!input.dataset.setting) return;

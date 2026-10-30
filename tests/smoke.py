@@ -146,8 +146,15 @@ def run():
             expect(page.locator("#right-panel")).to_contain_text("Confinement")
 
             def transfer_scp():
+                # The previous Surface selection may focus another Y cut.
+                # Jump explicitly to the original module's real transverse row.
+                cut = page.locator('#right-panel select[data-slice-select]')
+                expect(cut).to_be_visible()
+                cut.select_option("14")
+                expect(page.locator("#right-panel")).to_contain_text("Coupe souterraine Y=14")
                 # Cancel the construction cursor, then select the initial Safe containment room at x=2..4, level 0.
                 cancel = page.locator('#right-panel button[data-action="cancel-build"]')
+
                 if cancel.count():
                     cancel.click()
                 canvas = page.locator("#game-canvas")

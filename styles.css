@@ -2385,3 +2385,16 @@ kbd {
   }
 }
 
+
+/* Coupez transversalement le Site depuis les contrôles accessibles, sans
+   nécessiter 17 clics sur les boutons précédent/suivant. */
+.underground-slice-jump {
+  width: 100%;
+  min-height: 38px;
+  margin: 4px 0 12px;
+  padding: 7px 9px;
+  border: 1px solid rgba(175, 215, 205, .4);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--panel);
+}
