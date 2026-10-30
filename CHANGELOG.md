@@ -1,3 +1,13 @@
+## Operations — portes et sas souterrains (30 octobre 2026, base 1.0.0)
+
+- Portes et sas individuels installables sur les jonctions réelles X/Y du sous-sol.
+- Permissions directionnelles et habilitations appliquées aux routes de personnel.
+- File FIFO, sas individuel temporisé, suspension sur panne d'air/courant et évacuation côté origine.
+- Passage continu et retour physique lorsque la porte est verrouillée en cours de déplacement.
+- Sauvegarde des cycles, prix réellement payés, remboursement partiel et rejet des références invalides (schéma 5).
+- Icônes des seuils sur la coupe et le plan horizontal, et interface accessible sur mobile/clavier.
+- Régressions automatisées sur les portes, sas et sauvegardes.
+
 # Changelog
 
 ## 2026-10-29 — Tranche Operations : accès de surface, base 1.0.0

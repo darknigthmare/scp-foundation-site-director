@@ -548,22 +548,22 @@ namespace SCPGame {
         : gate.direction === 'a-to-b' ? `Sens : ${escapeHtml(getUndergroundDefinition(state.undergroundRooms.find((r) => r.id === gate.roomAId)!.type).name)} → B`
           : `Sens : B → A` : '';
       if (!gate) return `<div class="underground-gate-row"><strong>${label}</strong><small>${position} · passage ouvert (ancien réseau)</small>
-        <div class="action-row"><button data-action="add-underground-door" data-room="${selected.id}" data-other="${room.id}">Installer porte (650)</button>
-        <button data-action="add-underground-airlock" data-room="${selected.id}" data-other="${room.id}">Installer sas (2 600)</button></div></div>`;
+        <div class="action-row"><button data-action="add-underground-door" data-room="${escapeHtml(selected.id)}" data-other="${escapeHtml(room.id)}">Installer porte (650)</button>
+        <button data-action="add-underground-airlock" data-room="${escapeHtml(selected.id)}" data-other="${escapeHtml(room.id)}">Installer sas (2 600)</button></div></div>`;
       const locked = !gate.enabled || !canTraverseUndergroundGate(state, selected, room);
       const passengers = gate.queue.map((id) => state.staff.find((m) => m.id === id)?.name || id).join(', ');
       const occupant = gate.cycle ? state.staff.find((m) => m.id === gate.cycle?.staffId)?.name || gate.cycle.staffId : '';
       return `<div class="underground-gate-row"><strong>${gate.kind === 'airlock' ? 'Sas' : 'Porte'} — ${label}</strong>
         <small>${position} · ${direction} · habilitation ${gate.minClearance} · franchissements ${gate.passedCount}</small>
         <p class="hint" role="status">${locked ? 'Accès restreint · ' : ''}${escapeHtml(getUndergroundGateStatus(state, gate))}${occupant ? ` · occupant : ${escapeHtml(occupant)}` : ''}${passengers ? ` · file : ${escapeHtml(passengers)}` : ''}</p>
-        <div class="action-row"><button data-action="underground-gate-lock" data-gate="${gate.id}">${gate.enabled ? 'Verrouiller' : 'Déverrouiller'}</button>
-        <button data-action="underground-gate-clearance" data-gate="${gate.id}" data-delta="-1" ${gate.minClearance <= 0 ? 'disabled' : ''}>Habilitation −</button>
-        <button data-action="underground-gate-clearance" data-gate="${gate.id}" data-delta="1" ${gate.minClearance >= 5 ? 'disabled' : ''}>Habilitation +</button></div>
-        <div class="action-row"><button data-action="underground-gate-direction" data-gate="${gate.id}">Sens : ${gate.direction === 'both' ? '↔' : gate.direction === 'a-to-b' ? 'A → B' : 'B → A'}</button>
-        ${gate.kind === 'airlock' ? `<button data-action="underground-gate-power" data-gate="${gate.id}">Énergie ${gate.powered ? 'ON' : 'OFF'}</button>
-        <button data-action="underground-gate-air" data-gate="${gate.id}">Air ${gate.airSupply ? 'OK' : 'NOK'}</button>
-        <button data-action="underground-gate-evacuate" data-gate="${gate.id}">Évacuer</button>` : ''}
-        <button data-action="underground-gate-remove" data-gate="${gate.id}">Démonter</button></div>
+        <div class="action-row"><button data-action="underground-gate-lock" data-gate="${escapeHtml(gate.id)}">${gate.enabled ? 'Verrouiller' : 'Déverrouiller'}</button>
+        <button data-action="underground-gate-clearance" data-gate="${escapeHtml(gate.id)}" data-delta="-1" ${gate.minClearance <= 0 ? 'disabled' : ''}>Habilitation −</button>
+        <button data-action="underground-gate-clearance" data-gate="${escapeHtml(gate.id)}" data-delta="1" ${gate.minClearance >= 5 ? 'disabled' : ''}>Habilitation +</button></div>
+        <div class="action-row"><button data-action="underground-gate-direction" data-gate="${escapeHtml(gate.id)}">Sens : ${gate.direction === 'both' ? '↔' : gate.direction === 'a-to-b' ? 'A → B' : 'B → A'}</button>
+        ${gate.kind === 'airlock' ? `<button data-action="underground-gate-power" data-gate="${escapeHtml(gate.id)}">Énergie ${gate.powered ? 'ON' : 'OFF'}</button>
+        <button data-action="underground-gate-air" data-gate="${escapeHtml(gate.id)}">Air ${gate.airSupply ? 'OK' : 'NOK'}</button>
+        <button data-action="underground-gate-evacuate" data-gate="${escapeHtml(gate.id)}">Évacuer</button>` : ''}
+        <button data-action="underground-gate-remove" data-gate="${escapeHtml(gate.id)}">Démonter</button></div>
       </div>`;
     }).join('');
     return `<section class="summary-card underground-gates"><h3>Portes et sas souterrains</h3>

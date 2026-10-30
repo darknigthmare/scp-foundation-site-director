@@ -766,6 +766,30 @@ namespace SCPGame {
       }
       ctx.restore();
     }
+    // Transverse gate thresholds must stay visible on this cut even when a
+    // lockdown hides the normal green arrow into the neighbouring Y slice.
+    for (const gate of state.undergroundGates ?? []) {
+      const a = state.undergroundRooms.find((room) => room.id === gate.roomAId);
+      const b = state.undergroundRooms.find((room) => room.id === gate.roomBId);
+      if (!a || !b || a.level !== b.level) continue;
+      const ay = undergroundRoomSectionY(state, a);
+      const by = undergroundRoomSectionY(state, b);
+      if (ay === by || Math.abs(ay - by) !== 1 || (ay !== cut && by !== cut)) continue;
+      const visible = ay === cut ? a : b;
+      const other = ay === cut ? b : a;
+      const corridorX = (Math.max(a.x, b.x) + Math.min(a.x + a.width, b.x + b.width)) / 2;
+      const markerX = metrics.originX + corridorX * metrics.cellW;
+      const markerY = metrics.originY + visible.level * metrics.levelH
+        + (undergroundRoomSectionY(state, other) > cut ? metrics.levelH * .83 : metrics.levelH * .17);
+      const open = canTraverseUndergroundGate(state, visible, other);
+      ctx.save();
+      ctx.fillStyle = open ? (gate.kind === 'airlock' ? '#eccf87' : '#9ed6c9') : '#e57372';
+      ctx.strokeStyle = '#172a30';
+      ctx.lineWidth = 1;
+      ctx.fillRect(markerX - 6, markerY - 10, 12, 11);
+      ctx.strokeRect(markerX - 6, markerY - 10, 12, 11);
+      ctx.restore();
+    }
     drawUndergroundStaff(ctx, runtime, metrics);
     drawUndergroundPlanInset(runtime, width);
 
@@ -828,6 +852,21 @@ namespace SCPGame {
       ctx.strokeStyle = state.selectedId === room.id ? "#fff2b5" : "rgba(230,249,240,.34)";
       ctx.lineWidth = state.selectedId === room.id ? 2 : 0.6;
       ctx.strokeRect(x + .3, y + .3, Math.max(1, w - .6), Math.max(2, stepY - .6));
+    }
+    // The plan and the lateral section use the exact same gate records.
+    // Amber = airlock, green = door, red = closed or unpowered threshold.
+    for (const gate of state.undergroundGates ?? []) {
+      const a = state.undergroundRooms.find((room) => room.id === gate.roomAId);
+      const b = state.undergroundRooms.find((room) => room.id === gate.roomBId);
+      if (!a || !b || a.level !== level || b.level !== level) continue;
+      const ay = undergroundRoomSectionY(state, a), by = undergroundRoomSectionY(state, b);
+      const pX = ay === by ? (a.x + a.width === b.x ? b.x : a.x)
+        : (Math.max(a.x, b.x) + Math.min(a.x + a.width, b.x + b.width)) / 2;
+      const pY = ay === by ? ay + .5 : (ay + by + 1) / 2;
+      ctx.fillStyle = canTraverseUndergroundGate(state, a, b)
+        ? gate.kind === 'airlock' ? '#eccf87' : '#9ed6c9' : '#e57372';
+      ctx.fillRect(bounds.x + padding + pX * stepX - 2,
+        startY + pY * stepY - 2, 4, 4);
     }
     const cut = getSiteSectionSurfaceY(state);
     ctx.strokeStyle = "#ffdc91";

@@ -78,6 +78,16 @@ Le jeu est toujours rendu en **2.5D avec coupe et mini-carte 2D** : il possède 
 
 **Tests :** **119/119 tests métier** (17 nouveaux tests de réseau et d'annexes, plus une régression sur le menu Surface), **20/20 étapes Chromium**, aucune erreur console. La validation complète et le paquet jouable sont consignés dans le [rapport QA](docs/qa/2026-10-30/THREE_AXIS_UNDERGROUND_AND_ANNEXES.md). La base reste 1.0.0 ; Operations 1.1 complète n'est pas déclarée livrée.
 
+## Portes et sas physiques des galeries — tranche Operations (30 octobre 2026)
+
+Sur chaque module souterrain, le panneau **Portes et sas souterrains** liste les liaisons réelles à une galerie voisine (axe X ou entre deux coupes Y adjacentes). Pour chaque seuil, on peut installer une **porte** ou un **sas interverrouillé**, puis régler l'habilitation (0–5), le sens et le verrouillage. Les portes coûtent 650 crédits et 2 pièces, les sas 2 600 crédits et 7 pièces ; une installation en doublon est refusée avant paiement.
+
+Les accès modifient le **graphe de déplacement** des employés, pas seulement son dessin. Une porte fermée au milieu du franchissement impose un retour à vitesse normale sans passage fantôme. Un sas traite **un occupant à la fois**, avec file **FIFO**, quatre minutes simulées d'égalisation puis une traversée physique. Les pannes d'électricité ou d'air suspendent le cycle. Une évacuation manuelle ramène l'occupant du côté d'origine, sans compter de traversée. Les portes/sas installés restent visibles en coupe et sur la mini-carte : vert = porte, ambre = sas, rouge = accès fermé ou inaccessible.
+
+**Sauvegardes :** files, cycles, passages et coûts réellement réglés sont persistants ; une ancienne sauvegarde sans porte souterraine conserve ses galeries ouvertes. Le nouveau marqueur de schéma est **5** ; les références orphelines, double accès sur la même liaison et cycles falsifiés sont rejetés.
+
+**Validation :** [132 tests métier et 21 étapes Chromium réussis dans la CI](https://github.com/darknigthmare/scp-foundation-site-director/actions/runs/41060363210), aucun message navigateur. Le code contrôle des seuils X/Y mais reste dessiné en **2.5D** ; ce n'est ni une reconstruction 1:1 canonique d'un site SCP ni un moteur WebGL 3D achevé. Voir le [rapport QA](docs/qa/2026-10-30/UNDERGROUND_GATES_AND_AIRLOCKS.md).
+
 ## Lancement rapide
 
 ### Archive avec le build fourni

@@ -13,9 +13,9 @@
 
 ## Validation
 
-- **Tests métier locaux : 132/132 réussis** (13 tests supplémentaires relatifs aux portes et sas ; compilation TypeScript stricte, validation structurelle).
+- **Tests métier validés dans GitHub Actions : 132/132 réussis** (13 tests supplémentaires relatifs aux portes et sas ; compilation TypeScript stricte, validation structurelle).
 - **Navigateur local : non vérifié** (l'accès à `127.0.0.1` dans Chromium renvoie `ERR_BLOCKED_BY_ADMINISTRATOR` dans cet environnement). Le parcours Chromium GitHub Actions est la validation autoritative des interactions et captures.
-- **CI GitHub et ZIP :** à compléter après la validation de l'exécution finale ; ne pas confondre cette étape avec les résultats précédents de 119/119 et 20/20.
+- **CI du commit fonctionnel :** [GitHub Actions #41060363210](https://github.com/darknigthmare/scp-foundation-site-director/actions/runs/41060363210) — succès, **132/132 tests métier, 21/21 étapes Chromium, 0 message navigateur**. Capture `underground-airlock.png` et ZIP cumulatif disponibles dans les artefacts de cette exécution. La dernière retouche de rendu transversal et le changement de nom d'archive nécessitent une nouvelle validation CI.
 
 ## Limites
 

@@ -160,3 +160,19 @@ coupes sans parcourir une à une toutes les coordonnées Y. Le pipeline
 [41044273246](https://github.com/darknigthmare/scp-foundation-site-director/actions/runs/41044273246)
 a validé **119 tests Node, 20 étapes Chromium et 0 message navigateur**,
 y compris reprise des sauvegardes après fermeture et rechargement hors ligne.
+
+## 30 octobre 2026 — portes souterraines, sans raccourcis de rendu
+
+`src/underground-gates.ts` contrôle les arêtes physiques du réseau X/Y. Un
+seuil explicitement équipé impose sens et habilitation au routeur. Une porte
+en cours de franchissement possède un cycle exclusif : une fermeture impose
+un retour progressif, sans admission depuis une cellule fractionnaire.
+Les sas conservent leur file FIFO, leur occupant, leur temporisation et leur
+état électrique/air dans GameState (marqueur de schéma 5). Une ancienne
+sauvegarde sans `undergroundGates` conserve les liens physiques ouverts.
+
+Les mêmes accès sont dessinés dans la coupe et la mini-carte horizontale,
+y compris les seuils transversaux fermés. Les identifiants importés sont
+échappés dans les attributs de commande. QA : 132 tests métier, 21 étapes
+Chromium réussies dans la [CI #41060363210](https://github.com/darknigthmare/scp-foundation-site-director/actions/runs/41060363210).
+Les builds suivants doivent à nouveau être vérifiés après chaque commit.
