@@ -16,6 +16,7 @@
     "src/data.ts",
     "src/utils.ts",
     "src/access.ts",
+    "src/underground-navigation.ts",
     "src/state.ts",
     "src/simulation.ts",
     "src/renderers.ts",

@@ -540,6 +540,29 @@ namespace SCPGame {
     }
 
     state.undergroundRooms.forEach((room) => drawUndergroundRoom(ctx, runtime, room, metrics));
+    // Draw only physical junctions, never imaginary shortcuts through rock.
+    const accessible = state.undergroundRooms.filter((room) => canStaffEnterUndergroundRoom(room));
+    for (let i = 0; i < accessible.length; i += 1) {
+      for (let j = i + 1; j < accessible.length; j += 1) {
+        const a = accessible[i], b = accessible[j];
+        if (!areUndergroundRoomsConnected(a, b)) continue;
+        if (a.level === b.level) {
+          const boundary = a.x + a.width === b.x ? b.x : a.x;
+          ctx.fillStyle = "rgba(129,226,193,.85)";
+          ctx.fillRect(metrics.originX + boundary * metrics.cellW - 2,
+            metrics.originY + a.level * metrics.levelH + metrics.levelH * 0.48 - 5, 4, 10);
+        } else {
+          const x = metrics.originX + (a.x + a.width / 2) * metrics.cellW;
+          const top = metrics.originY + Math.min(a.level, b.level) * metrics.levelH;
+          ctx.strokeStyle = "rgba(129,226,193,.85)";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(x, top + metrics.levelH - 12);
+          ctx.lineTo(x, top + metrics.levelH + 7);
+          ctx.stroke();
+        }
+      }
+    }
     drawUndergroundStaff(ctx, runtime, metrics);
 
     if (runtime.hoveredCell) {

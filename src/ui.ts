@@ -462,10 +462,14 @@ namespace SCPGame {
           ["État", percent(selected.condition)],
           ["Confinement", String(getEffectiveRoomContainment(selected))],
           ["Sécurité", String(getEffectiveRoomSecurity(selected))],
-          ["Équipe", String(selected.staffAssigned.length)]
+          ["Équipe", String(selected.staffAssigned.length)],
+          ["Habilitation", `Niveau ${getUndergroundClearanceRequirement(selected)}`],
+          ["Ascenseur", hasUndergroundElevatorConnection(state, selected) ? "Relié" : "Non relié"],
+          ["Galerie", selected.sealed ? "Scellée" : "Ouverte"]
         ])}
         ${scp ? renderContainedScpCard(state, scp) : renderCompatibleTransfers(state, selected)}
         ${renderSelectionActions()}
+        <button class="wide-button" data-action="toggle-underground-seal" data-room="${escapeHtml(selected.id)}">${selected.sealed ? "Rouvrir le secteur" : "Sceller le secteur"}</button>
         <hr>
         ${renderBuildCatalog(state, "underground")}
       `;
@@ -1028,6 +1032,12 @@ namespace SCPGame {
         break;
       }
       case "remove-access": result = removeSurfaceAccess(state, String(target.dataset.room), String(target.dataset.access)); break;
+      case "toggle-underground-seal": {
+        const room = state.undergroundRooms.find((entry) => entry.id === target.dataset.room);
+        result = room ? setUndergroundSeal(state, room.id, !room.sealed)
+          : { ok: false, message: "Module souterrain introuvable." };
+        break;
+      }
       case "evacuate-access": result = evacuateSurfaceAccessAction(state, String(target.dataset.room), String(target.dataset.access)); break;
       case "select-staff": {
         state.selectedId = target.dataset.staff;

@@ -236,6 +236,14 @@ namespace SCPGame {
       createUndergroundRoom("elevator-shaft", 18, 0, 1),
       createUndergroundRoom("elevator-shaft", 18, 1, 1),
       createUndergroundRoom("elevator-shaft", 18, 2, 1),
+      // Visible galleries fill the genuine gaps in the starting installation.
+      createUndergroundRoom("service-tunnel", 5, 0, 3),
+      createUndergroundRoom("service-tunnel", 13, 0, 1),
+      createUndergroundRoom("service-tunnel", 16, 0, 2),
+      createUndergroundRoom("service-tunnel", 7, 1, 3),
+      createUndergroundRoom("service-tunnel", 13, 1, 1),
+      createUndergroundRoom("service-tunnel", 16, 1, 2),
+      createUndergroundRoom("service-tunnel", 16, 2, 2),
       createUndergroundRoom("service-tunnel", 8, 0, 5),
       createUndergroundRoom("security-post", 14, 0, 2),
       createUndergroundRoom("safe-containment", 2, 0, 3),
@@ -645,6 +653,15 @@ namespace SCPGame {
     return { ok: true, message: `${definition.name} opérationnel au niveau -${level + 1}.` };
   }
 
+  export function setUndergroundSeal(state: GameState, roomId: string, sealed: boolean): { ok: boolean; message: string } {
+    const room = state.undergroundRooms.find((entry) => entry.id === roomId);
+    if (!room) return { ok: false, message: "Module souterrain introuvable." };
+    if (room.sealed === sealed) return { ok: true, message: "État déjà appliqué." };
+    room.sealed = sealed;
+    logHistory(state, `${getUndergroundDefinition(room.type).name} : ${sealed ? "secteur scellé" : "accès rétabli"}.`);
+    return { ok: true, message: sealed ? "Secteur scellé : circulation interdite." : "Secteur rouvert : itinéraires recalculés." };
+  }
+
   export function upgradeSelected(state: GameState): { ok: boolean; message: string } {
     if (!state.selectedId || !state.selectedType) return { ok: false, message: "Aucun élément sélectionné." };
     if (state.selectedType === "facility") {
@@ -803,8 +820,10 @@ namespace SCPGame {
     const assigned = new Set<string>();
 
     const assignRole = (roomId: string, role: StaffRole, count: number, underground = false): void => {
+      const undergroundRoom = underground ? state.undergroundRooms.find((entry) => entry.id === roomId) : undefined;
       const candidates = available
-        .filter((member) => member.role === role && !assigned.has(member.id))
+        .filter((member) => member.role === role && !assigned.has(member.id)
+          && (!undergroundRoom || member.clearance >= getUndergroundClearanceRequirement(undergroundRoom)))
         .sort((a, b) => b.experience - a.experience);
       const selected = candidates.slice(0, count);
       selected.forEach((member) => {
