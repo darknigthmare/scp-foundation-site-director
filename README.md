@@ -102,6 +102,14 @@ Le marqueur de sauvegarde est désormais **6** ; les schémas plus anciens sont 
 
 [Rapport QA et limites détaillées](docs/qa/2026-10-30/UNDERGROUND_TECHNICAL_NETWORKS.md).
 
+## SCP : 12 réactions spécifiques et protocoles jouables
+
+Les 12 anomalies déjà intégrées ne partagent plus une simple pénalité électrique/eau/air identique. Le [tableau de couverture détaillé](docs/SCP_GAMEPLAY_COVERAGE.md) distingue **les SCP réellement dépendants de leur instrumentation** de ceux qui restent anormaux malgré une panne. SCP-914 ne dépend pas du courant pour son ressort ; SCP-294 ne reçoit pas son liquide d'une canalisation ; SCP-008 n'est transmis ni par l'air ni par l'eau. Chaque fiche affiche désormais **Diagnostic individuel du SCP** avec les trois réseaux, les risques de procédure, l'étude réellement possible et une intervention spécifique.
+
+Les actions SCP ont des **coûts, habilitations et prérequis de présence** ; un délai de réutilisation empêche l'exploitation gratuite. Les études nécessitent du personnel et un environnement adapté ; SCP-914/294 ne produisent plus de ressources de façon automatique. Les visites SCP-999 n'apportent du moral qu'aux employés physiquement présents, et le bonus SCP-131 à SCP-173 exige une vraie proximité. Le fonctionnement du bain acide de SCP-682 dépend d'une liaison technique réelle.
+
+C'est une **couverture de simulation et de procédures**, pas l'intégration canonique 1:1 de toutes les expériences, interactions et incarnations des SCP. La base reste en version 1.0.0.
+
 ## Lancement rapide
 
 ### Archive avec le build fourni

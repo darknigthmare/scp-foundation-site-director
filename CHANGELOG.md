@@ -1,3 +1,13 @@
+## Operations — comportements individuels SCP (30 octobre 2026)
+
+- 12 profils d'anomalies distincts × 3 états de panne (électricité, eau, ventilation).
+- Conformité, pression de brèche et recherche calculées selon les besoins réels du dossier.
+- Réponses opérationnelles payantes avec prérequis, habilitations, personnel présent et délai.
+- Correction de SCP-914 mécanique, SCP-294 non dépendant de l'eau du réseau, SCP-008 non aérien et non hydrique.
+- Correction des bonus sans présence physique (999 et 131), et des systèmes acides éloignés (682).
+- Diagnostics affichés en salle de confinement, gestion SCP et formulaire de procédure.
+- Documentation de couverture par SCP avec références primaires et limites connues.
+
 ## Operations — réseau souterrain électricité, eau, ventilation (30 octobre 2026, base 1.0.0)
 
 - Trois infrastructures physiques indépendantes par liaison de salles X/Y/profondeur.

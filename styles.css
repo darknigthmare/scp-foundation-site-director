@@ -2415,3 +2415,14 @@ kbd {
 .underground-utilities .utility-indicator { font-size: .78rem; padding: 4px 7px; border-radius: 5px; }
 .underground-utilities .utility-online { color: #b2ecd3; background: rgba(72,144,115,.22); }
 .underground-utilities .utility-offline { color: #f1aaa5; background: rgba(173,73,73,.18); }
+
+/* SCP-specific operational diagnostics. Collapsed in the dossier grid, open on
+   the selected containment room and in the procedure editor. */
+.scp-behavior-panel { margin: 10px 0; padding: 10px; border: 1px solid rgba(167,196,198,.28); border-radius: 8px; }
+.scp-behavior-panel > summary { cursor:pointer; font-size: .9rem; font-weight: 700; padding: 3px 0; }
+.scp-behavior-panel[open] > summary { margin-bottom: 9px; }
+.scp-behavior-panel .metric-grid { margin: 6px 0; }
+.scp-faults { list-style: disc; margin: 8px 0 10px; padding-left: 18px; max-height: 180px; overflow-y: auto; }
+.scp-faults li { margin: 5px 0; line-height: 1.35; font-size: .83rem; }
+.scp-behavior-panel .wide-button { min-height: 38px; font-size: .83rem; text-align: center; white-space: normal; }
+.scp-behavior-panel button:disabled { opacity: .56; cursor: not-allowed; }

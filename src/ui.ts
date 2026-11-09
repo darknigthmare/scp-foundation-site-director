@@ -53,12 +53,17 @@ namespace SCPGame {
     const signature = active ? focusSignature(active) : undefined;
     const scrollTop = container.scrollTop;
     const scrollLeft = container.scrollLeft;
+    const expandedDiagnostics = new Set(Array.from(container.querySelectorAll<HTMLDetailsElement>("details.scp-behavior-panel[open]"))
+      .map((element) => element.dataset.scp));
     const nestedScroll = Array.from(container.querySelectorAll<HTMLElement>("[data-preserve-scroll]")).map((element) => ({
       key: String(element.dataset.preserveScroll),
       top: element.scrollTop,
       left: element.scrollLeft
     }));
     container.innerHTML = html;
+    container.querySelectorAll<HTMLDetailsElement>("details.scp-behavior-panel").forEach((element) => {
+      if (expandedDiagnostics.has(element.dataset.scp)) element.open = true;
+    });
     container.scrollTop = scrollTop;
     container.scrollLeft = scrollLeft;
     nestedScroll.forEach((entry) => {
@@ -800,6 +805,27 @@ namespace SCPGame {
     return `<div><span>${escapeHtml(label)}</span><div><i style="width:${value}%"></i></div><b>${Math.round(value)}</b></div>`;
   }
 
+  function renderSCPBehaviorPanel(state: GameState, scp: SCPInstance, collapsed = false): string {
+    const report = inspectSCPBehavior(state, scp);
+    if (!report) return "";
+    const available = getSCPResponseAvailability(state, scp);
+    const status = (key: SCPService): string => report.utilities[key] ? "Raccordé" : "Indisponible";
+    return `<details class="scp-behavior-panel" data-scp="${escapeHtml(scp.id)}" aria-label="Diagnostic individuel du SCP" ${collapsed ? "" : "open"}>
+      <summary>Comportement et réponse spécifique</summary>
+      <p class="hint">${escapeHtml(report.profile.domain)}</p>
+      ${renderMetricGrid([["Électricité", status("power")], ["Eau", status("water")], ["Ventilation", status("air")],
+        ["Étude", `${Math.round(report.studyMultiplier * 100)} %`]])}
+      ${report.faults.length ? `<ul class="scp-faults">${report.faults.map((fault) =>
+        `<li class="${fault.priority === "critical" ? "status-danger" : "status-warning"}">${escapeHtml(fault.effect)}</li>`).join("")}</ul>`
+        : '<p class="hint">Contrôles particuliers nominaux.</p>'}
+      <p class="hint">${escapeHtml(report.profile.protocol)}</p>
+      <button class="wide-button" data-action="scp-response" data-scp="${escapeHtml(scp.id)}" ${available.ok ? "" : "disabled"}>
+        ${escapeHtml(report.profile.response)} · ${escapeHtml(costToString(report.profile.responseCost))}
+      </button>
+      ${available.ok ? "" : `<p class="hint" role="status">${escapeHtml(available.message)}</p>`}
+    </details>`;
+  }
+
   function renderContainedScpCard(state: GameState, scp: SCPInstance): string {
     const definition = getSCPDefinition(scp.definitionId);
     const procedure = state.procedures.find((entry) => entry.id === scp.procedureId);
@@ -810,7 +836,8 @@ namespace SCPGame {
         ${renderProgressMetric("Conformité", procedure?.compliance ?? 0)}
         ${renderProgressMetric("Risque", scp.breachRisk, true)}
         <p>${escapeHtml(scp.activeEffect)}</p>
-        <button class="wide-button" data-action="open-procedure" data-scp="${scp.id}">Modifier la procédure</button>
+        ${renderSCPBehaviorPanel(state, scp)}
+        <button class="wide-button" data-action="open-procedure" data-scp="${escapeHtml(scp.id)}">Modifier la procédure</button>
       </section>
     `;
   }
@@ -933,7 +960,9 @@ namespace SCPGame {
               <h3>${escapeHtml(definition.name)}</h3>
               <p>${escapeHtml(definition.description)}</p>
               ${renderMetricGrid([["Confiné", scp.contained ? "Oui" : "Non"], ["Risque", percent(scp.breachRisk)], ["Connaissance", percent(scp.knowledge)], ["Cellule", room ? `-${room.level + 1}` : "—"]])}
-              <div class="action-row"><button data-action="open-procedure" data-scp="${scp.id}">Procédure v${procedure?.version ?? 1}</button>${!scp.contained ? `<button data-action="focus-scp" data-scp="${scp.id}">Transférer</button>` : ""}</div>
+              ${scp.contained ? renderSCPBehaviorPanel(state, scp, true)
+                : `<p class="hint">${escapeHtml(SCP_BEHAVIOR_PROFILES[scp.definitionId]?.protocol ?? "")} — dossier non confiné.</p>`}
+              <div class="action-row"><button data-action="open-procedure" data-scp="${escapeHtml(scp.id)}">Procédure v${procedure?.version ?? 1}</button>${!scp.contained ? `<button data-action="focus-scp" data-scp="${escapeHtml(scp.id)}">Transférer</button>` : ""}</div>
             </article>
           `;
         }).join("")}
@@ -1057,6 +1086,7 @@ namespace SCPGame {
       <div class="modal-card procedure-modal">
         <header><div><span>PROCÉDURE v${procedure.version}</span><h2 id="modal-title">${definition.designation} — ${escapeHtml(definition.name)}</h2></div><button data-action="close-modal" aria-label="Fermer">×</button></header>
         <p>${escapeHtml(definition.uniqueRule)}</p>
+        ${renderSCPBehaviorPanel(state, scp)}
         <div class="procedure-layout">
           <section>
             ${renderRange("observationLevel", "Niveau d'observation", procedure.observationLevel)}
@@ -1270,6 +1300,8 @@ namespace SCPGame {
       case "dismiss-staff": result = dismissStaff(state, String(target.dataset.staff)); break;
       case "research": result = researchNode(state, String(target.dataset.node)); break;
       case "transfer-scp": result = transferSCP(state, String(target.dataset.scp), String(target.dataset.room)); break;
+      case "scp-response": result = performSCPResponse(state, String(target.dataset.scp));
+        renderedModalKey = ""; break;
       case "focus-scp": focusSCPForTransfer(state, String(target.dataset.scp)); break;
       case "open-procedure": procedureScpId = String(target.dataset.scp); modalMode = "procedure"; break;
       case "save-procedure": result = saveProcedureFromModal(state, String(target.dataset.scp)); if (result.ok) closeModal(state); break;
